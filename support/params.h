@@ -4,8 +4,7 @@
 #include "common.h"
 
 typedef struct Params {
-    unsigned int   input_size;
-    T     alpha;
+    unsigned int   num_samples;
     int   n_warmup;
     int   n_reps;
 }Params;
@@ -20,15 +19,13 @@ static void usage() {
         "\n    -e <E>    # of timed repetition iterations (default=1)"
         "\n"
         "\nWorkload-specific options:"
-        "\n    -i <I>    input size (default=2621440 elements)"
-        "\n    -a <A>    alpha (default=100)"
+        "\n    -i <I>    number of MNIST samples to be processed per DPU transfer (default=1 elements)"
         "\n");
 }
 
 struct Params input_params(int argc, char **argv) {
     struct Params p;
-    p.input_size    = 2621440;
-    p.alpha         = 100;
+    p.num_samples    = 1;
     p.n_warmup      = 0;
     p.n_reps        = 1;
 
@@ -39,8 +36,7 @@ struct Params input_params(int argc, char **argv) {
         usage();
         exit(0);
         break;
-        case 'i': p.input_size    = atoi(optarg); break;
-        case 'a': p.alpha         = atoi(optarg); break;
+        case 'i': p.num_samples    = atoi(optarg); break;
         case 'w': p.n_warmup      = atoi(optarg); break;
         case 'e': p.n_reps        = atoi(optarg); break;
         default:

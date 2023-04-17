@@ -1,51 +1,39 @@
 #ifndef _COMMON_H_
 #define _COMMON_H_
 
-// Transfer size between MRAM and WRAM
-#ifdef BLOCK
-#define BLOCK_SIZE_LOG2 BLOCK
-#define BLOCK_SIZE (1 << BLOCK_SIZE_LOG2)
-#else
-#define BLOCK_SIZE_LOG2 8
-#define BLOCK_SIZE (1 << BLOCK_SIZE_LOG2)
-#define BLOCK BLOCK_SIZE_LOG2
-#endif
+#include "../cbthowen/model.h"
+#include "../cbthowen/tensor.h"
 
-// Data type
-#ifdef INT32
-#define T int32_t
-#define DIV 2 // Shift right to divide by sizeof(T)
-#elif INT64
-#define T int64_t
-#define DIV 3 // Shift right to divide by sizeof(T)
-#elif FLOAT
-#define T float
-#define DIV 2 // Shift right to divide by sizeof(T)
-#elif DOUBLE
-#define T double
-#define DIV 3 // Shift right to divide by sizeof(T)
-#elif CHAR
-#define T char
-#define DIV 0 // Shift right to divide by sizeof(T)
-#elif SHORT
-#define T short
-#define DIV 1 // Shift right to divide by sizeof(T)
-#endif
+#define ROUND_UP_TO_MULTIPLE_OF_8(x)    ((((x) + 7)/8)*8)
 
-// Structures used by both the host and the dpu to communicate information
 typedef struct {
-    uint32_t size;
-    uint32_t transfer_size;
-	enum kernels {
+    uint32_t model_size_bytes;
+    uint32_t input_size_bytes;
+
+    enum kernels {
 	    kernel1 = 0,
 	    nr_kernels = 1,
 	} kernel;
-    T alpha;
-} dpu_arguments_t; // Input arguments
+
+    dpu_model_params_t model_params;
+} dpu_params_t;
 
 typedef struct {
-    uint64_t count;
+    uint8_t prediction;
 } dpu_results_t; // Results (cycle count)
+
+typedef struct {
+    uint32_t num_classes;
+
+    uint32_t num_filters;
+    uint32_t filter_inputs;
+    uint32_t filter_entries;
+    uint32_t filter_hashes;
+    
+    uint32_t bleach;
+} dpu_model_params_t;
+
+typedef bmatrix_t dpu_model_t;
 
 #define ANSI_COLOR_RED     "\x1b[31m"
 #define ANSI_COLOR_GREEN   "\x1b[32m"

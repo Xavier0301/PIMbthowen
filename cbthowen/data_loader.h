@@ -38,3 +38,5 @@ void binarize_mnist(size_t num_bits);
 void print_binarized_mnist_image(size_t index, size_t num_bits);
 void print_mnist_image(size_t index);
 void print_mnist_image_raw(size_t index);
+
+void fill_input_random(unsigned char* input, size_t input_length);

@@ -40,7 +40,7 @@ void read_tensor(FILE* f, tensor3d_t* tensor, size_t size) {
 
 
 #define SAVE_FIELD(structure, name, fp) (fwrite(&structure->name, sizeof(structure->name), 1, fp))
-#define SAVE_BUFFER(structure, name, num, fp) (fwrite(structure->name, sizeof(structure->name), num, fp))
+#define SAVE_BUFFER(structure, name, num, fp) (fwrite(structure->name, sizeof(*structure->name), num, fp))
 
 void write_model(const char* filename, model_t* model) {
     FILE* f = fopen(filename, "w");

@@ -173,3 +173,9 @@ void binarize_mnist(size_t num_bits) {
     binarize_matrix(&binarized_train, &train_images, MNIST_IM_SIZE, MNIST_NUM_TRAIN, num_bits);
     binarize_matrix(&binarized_test, &test_images, MNIST_IM_SIZE, MNIST_NUM_TEST, num_bits);
 }
+
+void fill_input_random(unsigned char* input, size_t input_length) {
+    for(size_t it = 0; it < input_length; ++it) {
+        input[it] = rand() % 2;
+    }
+}

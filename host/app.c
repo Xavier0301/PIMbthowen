@@ -17,32 +17,25 @@
 #include "../support/timer.h"
 #include "../support/params.h"
 
+#include "../cbthowen/model.h"
+#include "../cbthowen/model_manager.h"
+#include "../cbthowen/data_loader.h"
+#include "../cbthowen/batch.h"
+
 // Define the DPU Binary path as DPU_BINARY here
 #ifndef DPU_BINARY
 #define DPU_BINARY "./bin/dpu_code"
 #endif
 
+// Define the WNN Model path as MODEL_PATH here
+#ifndef MODEL_PATH
+#define MODEL_PATH "./model.dat"
+#endif
+
 // Pointer declaration
-static T* X;
-static T* Y;
-static T* Y_host;
-
-// Create input arrays
-static void read_input(T* A, T* B, unsigned int nr_elements) {
-    srand(0);
-    printf("nr_elements\t%u\n", nr_elements);
-    for (unsigned int i = 0; i < nr_elements; i++) {
-        A[i] = (T) (rand());
-        B[i] = (T) (rand());
-    }
-}
-
-// Compute output in the host for verification purposes
-static void axpy_host(T* A, T* B, T alpha, unsigned int nr_elements) {
-    for (unsigned int i = 0; i < nr_elements; i++) {
-        B[i] = alpha * A[i] + B[i];
-    }
-}
+static tensor3d_t hashes;
+static size_t* results;
+static size_t* results_host;
 
 // Main of the Host Application
 int main(int argc, char **argv) {
@@ -63,36 +56,56 @@ int main(int argc, char **argv) {
     DPU_ASSERT(dpu_alloc(NR_DPUS, NULL, &dpu_set));
     DPU_ASSERT(dpu_get_nr_dpus(dpu_set, &nr_of_dpus)); // Number of DPUs in the DPU set
     printf("Allocated %d DPU(s)\t", nr_of_dpus);
-    printf("NR_TASKLETS\t%d\tBLOCK\t%d\n", NR_TASKLETS, BLOCK);
+    printf("NR_TASKLETS\t%d\n", NR_TASKLETS);
 
     // Load binary
     DPU_ASSERT(dpu_load(dpu_set, DPU_BINARY, NULL));
 
-    // Input size 
-    const unsigned int input_size = p.input_size; // Total input size 
-    const unsigned int input_size_8bytes = 
-        ((input_size * sizeof(T)) % 8) != 0 ? roundup(input_size, 8) : input_size; // Total input size, 8-byte aligned
-    const unsigned int input_size_dpu = divceil(input_size, nr_of_dpus); // Input size per DPU (max.)
-    const unsigned int input_size_dpu_8bytes = 
-        ((input_size_dpu * sizeof(T)) % 8) != 0 ? roundup(input_size_dpu, 8) : input_size_dpu; // Input size per DPU (max.), 8-byte aligned
+    // Load model
+    printf("Loading model\n");
+         
+    model_t model;
+    read_model(MODEL_PATH, &model);
+
+    // Loading+Binarizing dataset
+    printf("Loading dataset\n");
+    load_mnist();
+
+    printf("Binarizing dataset with %zu bits per input\n", model.bits_per_input);
+    binarize_mnist(model.bits_per_input);
+
+    print_binarized_mnist_image(7555, 2);
+
+    // Calculate model size
+    const unsigned int model_entries = model.filter_entries * model.num_filters * model.num_classes;
+    const unsigned int model_entries_8bytes = 
+        ((model_entries * sizeof(entry_t)) % 8) != 0 ? roundup(model_entries, 8) : model_entries;
+
+    // Calculate input size
+    const unsigned int num_samples = p.num_samples;
+    const unsigned int dpu_num_samples = divceil(num_samples, nr_of_dpus);
+
+    const unsigned int hashes_per_image = model.num_filters * model.filter_hashes;
+    const unsigned int dpu_num_hashes = hashes_per_image * dpu_num_samples;
+    const unsigned int dpu_num_hashes_8bytes = 
+        ((dpu_num_hashes * sizeof(entry_t)) % 8) != 0 ? roundup(dpu_num_hashes, 8) : dpu_num_hashes;
 
     // Input/output allocation in host main memory
-    X = malloc(input_size_dpu_8bytes * nr_of_dpus * sizeof(T));
-    Y = malloc(input_size_dpu_8bytes * nr_of_dpus * sizeof(T));
-    Y_host = malloc(input_size_dpu_8bytes * nr_of_dpus * sizeof(T));
-    T *bufferX = X;
-    T *bufferY = Y;
-    T alpha = p.alpha;
+    tensor_init(&hashes, num_samples, model.num_filters, model.filter_hashes);
+    results = (size_t*) calloc(num_samples, sizeof(*results));
+
     unsigned int i = 0;
 
-    const unsigned int bytes_per_dpu =  input_size_dpu_8bytes * sizeof(T);
+    const unsigned int model_bytes_per_dpu = model_entries_8bytes * sizeof(*model.data.data);
+    const unsigned int model_bytes_total = model_bytes_per_dpu * nr_of_dpus;
+
+    const unsigned int bytes_per_dpu =  dpu_num_hashes_8bytes * sizeof(entry_t);
     const unsigned int bytes_total = bytes_per_dpu * nr_of_dpus;
 
     unsigned int each_dpu = 0;
 
-    // Create an input file with arbitrary data
-    read_input(X, Y, input_size);
-    memcpy(Y_host, Y, input_size_dpu_8bytes * nr_of_dpus * sizeof(T));
+    // Create hashes to be transfered to the UpMem DPUs.
+    batch_hashing(&hashes, &model, &test_images, num_samples);
 
     // Loop over main kernel
     for(int rep = 0; rep < p.n_warmup + p.n_reps; rep++) {
@@ -100,7 +113,8 @@ int main(int argc, char **argv) {
         // Compute output on CPU (verification purposes)
         if(rep >= p.n_warmup)
             start(&timer, 0, rep - p.n_warmup);
-        axpy_host(X, Y_host, alpha, input_size);
+        
+        batch_prediction(results_host, model, &test_images, num_samples);
         if(rep >= p.n_warmup)
             stop(&timer, 0);
 
@@ -109,15 +123,11 @@ int main(int argc, char **argv) {
         unsigned int kernel = 0;
         dpu_arguments_t input_arguments[NR_DPUS];
         for(i=0; i<nr_of_dpus-1; i++) {
-            input_arguments[i].size=input_size_dpu_8bytes * sizeof(T); 
-            input_arguments[i].transfer_size=input_size_dpu_8bytes * sizeof(T); 
+            input_arguments[i].input_size_bytes=dpu_num_hashes_8bytes * sizeof(entry_t); 
             input_arguments[i].kernel=kernel;
-            input_arguments[i].alpha=alpha;
         }
-        input_arguments[nr_of_dpus-1].size=(input_size_8bytes - input_size_dpu_8bytes * (NR_DPUS-1)) * sizeof(T); 
-        input_arguments[nr_of_dpus-1].transfer_size=input_size_dpu_8bytes * sizeof(T); 
+        input_arguments[nr_of_dpus-1].input_size_bytes=(input_size_8bytes - dpu_num_hashes_8bytes * (NR_DPUS-1)) * sizeof(entry_t); 
         input_arguments[nr_of_dpus-1].kernel=kernel;
-        input_arguments[nr_of_dpus-1].alpha=alpha;
 
         if(rep >= p.n_warmup)
             start(&timer, 1, rep - p.n_warmup); // Start timer (CPU-DPU transfers)

@@ -7,7 +7,7 @@
 
 #include "math.h"
 
-typedef uint64_t entry_t;
+typedef uint32_t entry_t;
 
 typedef struct {
     size_t axis1;
@@ -35,7 +35,7 @@ typedef struct {
 
 typedef struct {
     size_t stride;
-    uint64_t* data;
+    entry_t* data;
 } matrix_t;
 
 #define MATRIX_AXIS1(t, i) ((t).data + i * (t).stride)

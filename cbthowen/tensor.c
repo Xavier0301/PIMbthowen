@@ -4,19 +4,19 @@ void tensor_init(tensor3d_t* t, size_t shape1, size_t shape2, size_t shape3) {
     t->stride1 = shape2 * shape3;
     t->stride2 = shape3;
 
-    t->data = (uint64_t*) calloc(shape1 * shape2 * shape3, sizeof(uint64_t));
+    t->data = (entry_t*) calloc(shape1 * shape2 * shape3, sizeof(*t->data));
 }
 
 void matrix_init(matrix_t* m, size_t rows, size_t cols) {
     m->stride = cols;
 
-    m->data = (uint64_t*) calloc(rows * cols, sizeof(uint64_t));
+    m->data = (entry_t*) calloc(rows * cols, sizeof(*m->data));
 }
 
 void bmatrix_init(bmatrix_t* m, size_t rows, size_t cols) {
     m->stride = cols;
 
-    m->data = (unsigned char*) calloc(rows * cols, sizeof(unsigned char));
+    m->data = (unsigned char*) calloc(rows * cols, sizeof(*m->data));
 }
 
 void bmatrix_mean(double* mean, bmatrix_t* dataset, size_t sample_size, size_t num_samples) {

@@ -12,6 +12,7 @@
 typedef unsigned char element_t;
 
 extern element_t* reorder_buffer;
+extern matrix_t hashes_buffer;
 
 typedef struct {
     size_t pad_zeros;
@@ -51,13 +52,23 @@ void model_init(model_t* model, size_t num_inputs, size_t num_classes, size_t fi
 void model_init_buffers(model_t* model);
 
 /**
- * @brief Performs an inference with the provided input
+ * @brief Performs an inference with the provided input. Hashing is delegated to filters.
+ * 
+ * @param model A initialized model
+ * @param input A vector of boolean values representing the input sample
+ * @return size_t 
+ */
+size_t model_predict(model_t* model, element_t* input); 
+
+/**
+ * @brief Performs an inference with the provided input. This uses a two stage prediction model 
+ * with (1) Reorder (2) Hashes the whole reordered input (3) Performs filter reductions
  * 
  * @param model A initialized model
  * @param input A vector of boolean values representing the input sample
  * @return uint64_t 
  */
-uint64_t model_predict(model_t* model, element_t* input); 
+size_t model_predict2(model_t* model, element_t* input);
 
 /**
  * @brief Performs a training step (updating filter values) for all discriminators
@@ -96,10 +107,20 @@ void discriminator_train(model_t* model, size_t discriminator_index, element_t* 
  * 
  * @return 1 if input is maybe a member of filter and 0 if input is definitely not a member of filter
  */
-uint64_t filter_check_membership(model_t* model, size_t discriminator_index, size_t filter_index, element_t* input);
+int filter_check_membership(model_t* model, size_t discriminator_index, size_t filter_index, element_t* input);
 
 /**
- * @brief 
+ * @brief Performs MIN reduction of the given filter for the given number of hashes
+ * 
+ * @param filter 
+ * @param hashes 
+ * @param filter_hashes 
+ * @return entry_t 
+ */
+entry_t filter_reduction(entry_t* filter, entry_t* hashes, size_t filter_hashes);
+
+/**
+ * @brief Make the filter learn the input
  * 
  * @param model The model to train
  * @param discriminator_index The index of the discriminator in the model passed (the class of input)
@@ -107,5 +128,19 @@ uint64_t filter_check_membership(model_t* model, size_t discriminator_index, siz
  * @param input A bitvector
  */
 void filter_add_member(model_t* model, size_t discriminator_index, size_t filter_index, element_t* input);
+
+/**
+ * @brief Hashes the whole input by (1) dividing the input into chunks that go into each filter
+ * (2) hashing each chunk a specified number of times
+ * 
+ * @param hashes A malloc-e
+ * d hash buffer of shape (#filter, #filter_hashes)
+ * @param hash_params Hash params of shape (#filter_hashes, #filter_inputs)
+ * @param num_filters
+ * @param filter_hashes 
+ * @param filter_inputs 
+ * @param input 
+ */
+void perform_hashing(matrix_t resulting_hashes, model_t* model, element_t* input);
 
 #endif
