@@ -33,6 +33,8 @@ typedef struct {
     tensor3d_t data; // of shape (#Discriminators, #Filters, #Entries)
 } model_t;
 
+void reorder_array(element_t* buffer, element_t* input, size_t* order, size_t len);
+
 /**
  * @brief Initialize a model.
  * 

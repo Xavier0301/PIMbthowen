@@ -3,9 +3,9 @@
 element_t* reorder_buffer;
 matrix_t hashes_buffer; // used in predict2
 
-void set_reorder_buffer(element_t* input, size_t* order, size_t len) {
+void reorder_array(element_t* result, element_t* input, size_t* order, size_t len) {
     for(size_t it = 0; it < len; ++it)
-        reorder_buffer[it] = input[order[it]];
+        result[it] = input[order[it]];
 }
 
 void randomize_input_order(size_t* input_order, size_t len) {
@@ -56,7 +56,7 @@ void model_init_buffers(model_t* model){
 
 // assumes input is already zero padded
 size_t model_predict(model_t* model, element_t* input) {
-    set_reorder_buffer(input, model->input_order, model->num_inputs_total);
+    reorder_array(reorder_buffer, input, model->input_order, model->num_inputs_total);
 
     size_t response_index = 0;
     uint64_t max_response = 0;
@@ -72,7 +72,7 @@ size_t model_predict(model_t* model, element_t* input) {
 }
 
 void model_train(model_t* model, element_t* input, uint64_t target) {    
-    set_reorder_buffer(input, model->input_order, model->num_inputs_total);
+    reorder_array(reorder_buffer, input, model->input_order, model->num_inputs_total);
 
     discriminator_train(model, target, reorder_buffer);
 }
@@ -172,7 +172,7 @@ void perform_hashing(matrix_t resulting_hashes, model_t* model, element_t* input
 
 size_t model_predict2(model_t* model, element_t* input) {
     // Reorder
-    set_reorder_buffer(input, model->input_order, model->num_inputs_total);
+    reorder_array(reorder_buffer, input, model->input_order, model->num_inputs_total);
 
     // Hash
     perform_hashing(hashes_buffer, model, reorder_buffer);

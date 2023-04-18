@@ -13,10 +13,10 @@
 #include "../support/common.h"
 #include "../support/cyclecount.h"
 
-#include "../cbthowen/model.h"
-
 // Input and output argumentsd
+__host dpu_params_t DPU_INPUT_ARGUMENTS;
 __host dpu_results_t DPU_RESULTS[NR_TASKLETS];
+__host dpu_prediction_t DPU_PREDICTION;
 
 // Barrier
 BARRIER_INIT(my_barrier, NR_TASKLETS);
@@ -28,27 +28,14 @@ int main(void) {
     return kernels[DPU_INPUT_ARGUMENTS.kernel](); 
 }
 
-static uint16_t filter_reduction(uint16_t* filter, uint16_t* hashes, unsigned char nr_hashes) {
-    uint16_t min = 0xffff;
+static uint32_t filter_reduction(uint32_t* filter, uint32_t* hashes, uint32_t nr_hashes) {
+    uint32_t min = -1;
     for(size_t it = 0; it < nr_hashes; ++it) {
-        uint16_t entry = filter[hashes[it]];
+        uint32_t entry = filter[hashes[it]];
         if(entry <= min) min = entry;
     }
 
     return min;
-}
-
-// Returns the popcount of the outputs of a given number of filters
-static uint16_t filter_reductions(uint16_t* filters, uint16_t* hashes, unsigned char nr_filters, uint16_t filter_entries, unsigned char nr_hashes) {
-    uint16_t popcount;
-
-    uint16_t* filter;
-    for(size_t it = 0; it < nr_filters; ++it) {
-        filter = filters + it * filter_entries;
-        popcount += filter_reduction(filter, hashes, nr_hashes);
-    }
-
-    return popcount;
 }
 
 // main_kernel1
@@ -59,48 +46,67 @@ int main_kernel1() {
 #endif
     if (tasklet_id == 0) { 
         mem_reset(); // Reset the heap
-    } else {
-        return 0;
+#ifdef CYCLES
+        perfcounter_config(COUNT_CYCLES, true); // Initialize once the cycle counter
+#elif INSTRUCTIONS
+        perfcounter_config(COUNT_INSTRUCTIONS, true); // Initialize once the instruction counter
+#endif
     }
 
     // Barrier
-    // barrier_wait(&my_barrier);
-
-    // Load parameters
-    uint32_t params_m = (uint32_t) DPU_MRAM_HEAP_POINTER;
-    dpu_params_t* params_w = (dpu_params_t*) mem_alloc(ROUND_UP_TO_MULTIPLE_OF_8(sizeof(dpu_params_t)));
-    mram_read((__mram_ptr void const*) params_m, params_w, ROUND_UP_TO_MULTIPLE_OF_8(sizeof(dpu_params_t)));
+    barrier_wait(&my_barrier);
+#if defined(CYCLES) || defined(INSTRUCTIONS)
+    perfcounter_count count;
+    result->count = 0;
+    counter_start(&count); // START TIMER
+#endif
 
     // Load model + input
-    uint32_t model_size_dpu_bytes_transfer = DPU_INPUT_ARGUMENTS.model_size_bytes; // Transfer input size per DPU in bytes
-    uint32_t input_size_dpu_bytes_transfer = DPU_INPUT_ARGUMENTS.input_size_bytes; // Input size per DPU in bytes
+    uint32_t model_size_dpu_bytes = DPU_INPUT_ARGUMENTS.model_size_bytes; // Transfer input size per DPU in bytes
+    uint32_t input_size_dpu_bytes = DPU_INPUT_ARGUMENTS.input_size_bytes; // Input size per DPU in bytes
 
-    uint32_t mram_base_addr_model = (uint32_t) (DPU_MRAM_HEAP_POINTER + sizeof(dpu_params_t));
-    uint32_t mram_base_addr_inputs = (uint32_t) (DPU_MRAM_HEAP_POINTER + model_size_dpu_bytes + sizeof(dpu_params_t));
-    uint32_t mram_base_addr_outputs = (uint32_t) (DPU_MRAM_HEAP_POINTER + model_size_dpu_bytes + input_size_dpu_bytes + sizeof(dpu_params_t));
+    dpu_model_params_t model_params = DPU_INPUT_ARGUMENTS.model_params;
+
+    uint32_t mram_base_addr_model = (uint32_t) (DPU_MRAM_HEAP_POINTER);
+    uint32_t mram_base_addr_inputs = (uint32_t) (mram_base_addr_model + model_size_dpu_bytes);
 
     // Initialize a local cache in WRAM to store the MRAM block
-    uint16_t* filter_buffer = (uint16_t*) mem_alloc(ROUND_UP_TO_MULTIPLE_OF_8(sizeof(uint16_t)) * params_w->model_params.filter_entries);
-    uint16_t* hashes_buffer = (uint16_t*) mem_alloc(ROUND_UP_TO_MULTIPLE_OF_8(sizeof(uint16_t)) * params_w->model_params.filter_inputs);
+    uint32_t* filter_buffer = (uint32_t*) mem_alloc(ROUND_UP_TO_MULTIPLE_OF_8(sizeof(uint32_t) * model_params.filter_entries));
+    uint32_t* hashes_buffer = (uint32_t*) mem_alloc(ROUND_UP_TO_MULTIPLE_OF_8(sizeof(uint32_t) * model_params.filter_inputs));
 
-    uint16_t* popcounts = (uint16_t*) mem_alloc(ROUND_UP_TO_MULTIPLE_OF_8(sizeof(uint16_t)) * params_w->model_params.num_classes);
+    uint32_t* popcounts = (uint32_t*) mem_alloc(ROUND_UP_TO_MULTIPLE_OF_8(sizeof(uint32_t) * model_params.num_classes));
 
 #if PRINT
     printf("%u. Starting work\n", tasklet_id);
 #endif
 
-    for(unsigned int filter_it = 0; filter_it < params_w->model_params.num_filters; ++filter_it) {
-        mram_read(mram_base_addr_inputs + filter_it * params_w->model_params.filter_hashes * sizeof(uint16_t), hashes_buffer, params_w->model_params.filter_hashes * sizeof(uint16_t));
-        for(unsigned int discriminator_it = 0; discriminator_it < params_w->model_params.num_classes; ++discriminator_it) {
-            mram_read(mram_base_addr_model + discriminator_it * params_w->model_params.filter_entries * sizeof(uint16_t), filter_buffer, params_w->model_params.filter_entries * sizeof(uint16_t));
+    for(unsigned int filter_it = 0; filter_it < model_params.num_filters; ++filter_it) {
+        mram_read(mram_base_addr_inputs + filter_it * model_params.filter_hashes * sizeof(uint32_t), hashes_buffer, model_params.filter_hashes * sizeof(uint32_t));
+        for(unsigned int discriminator_it = 0; discriminator_it < model_params.num_classes; ++discriminator_it) {
+            mram_read(mram_base_addr_model + discriminator_it * model_params.filter_entries * sizeof(uint32_t), filter_buffer, model_params.filter_entries * sizeof(uint32_t));
 
-            popcounts[discriminator_it] += filter_reduction(filter_buffer, hashes_buffer, params_w->model_params.filter_hashes);
+            popcounts[discriminator_it] += filter_reduction(filter_buffer, hashes_buffer, model_params.filter_hashes);
         }
     }
 
-    for(unsigned int discriminator_it = 0; discriminator_it < params_w->model_params.num_classes; ++discriminator_it) {
-        mram_write(popcounts, mram_base_addr_outputs, params_w->model_params.num_classes * sizeof(uint16_t));
+    uint32_t max_pcount = 0;
+    uint64_t argmax_pcount = 0;
+    for(unsigned int discriminator_it = 0; discriminator_it < model_params.num_classes; ++discriminator_it) {
+        if(popcounts[discriminator_it] >= max_pcount) {
+            max_pcount = popcounts[discriminator_it];
+            argmax_pcount = discriminator_it;
+        }
     }
+
+    DPU_PREDICTION.prediction = argmax_pcount;
+
+#if PRINT
+    printf("%u. Work done\n", tasklet_id);
+#endif
+
+#if defined(CYCLES) || defined(INSTRUCTIONS)
+    result->count += counter_stop(&count); // STOP TIMER
+#endif
 	
     return 0;
 }

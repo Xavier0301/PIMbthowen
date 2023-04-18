@@ -11,10 +11,10 @@
 #include "tensor.h"
 
 // set appropriate path for data
-#define MNIST_TRAIN_IMAGE "/Users/xavier/Desktop/Cours/Ici/WNN/Cbthowen/data/train-images-idx3-ubyte"
-#define MNIST_TRAIN_LABEL "/Users/xavier/Desktop/Cours/Ici/WNN/Cbthowen/data/train-labels-idx1-ubyte"
-#define MNIST_TEST_IMAGE "/Users/xavier/Desktop/Cours/Ici/WNN/Cbthowen/data/t10k-images-idx3-ubyte"
-#define MNIST_TEST_LABEL "/Users/xavier/Desktop/Cours/Ici/WNN/Cbthowen/data/t10k-labels-idx1-ubyte"
+#define MNIST_TRAIN_IMAGE "./data/train-images-idx3-ubyte"
+#define MNIST_TRAIN_LABEL "./data/train-labels-idx1-ubyte"
+#define MNIST_TEST_IMAGE "./data/t10k-images-idx3-ubyte"
+#define MNIST_TEST_LABEL "./data/t10k-labels-idx1-ubyte"
 
 #define MNIST_IM_SIZE 784 // 28*28
 #define MNIST_NUM_TRAIN 60000

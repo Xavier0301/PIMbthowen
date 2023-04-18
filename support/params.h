@@ -30,7 +30,7 @@ struct Params input_params(int argc, char **argv) {
     p.n_reps        = 1;
 
     int opt;
-    while((opt = getopt(argc, argv, "hi:a:w:e:")) >= 0) {
+    while((opt = getopt(argc, argv, "h:i:w:e:")) >= 0) {
         switch(opt) {
         case 'h':
         usage();

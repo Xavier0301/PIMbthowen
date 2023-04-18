@@ -9,6 +9,8 @@
 #include "data_loader.h"
 #include "model_manager.h"
 
+#include "batch.h"
+
 void train() {
     model_t model;
 
@@ -109,6 +111,38 @@ void compare() {
     printf("Agreeing: %lf%%\n", 100 * ((double) agree) / MNIST_NUM_TEST);
 }
 
+void test_batching() {
+    model_t model;
+
+    printf("Loading model\n");
+
+    read_model("model.dat", &model);
+
+    printf("Loading dataset\n");
+    load_mnist();
+
+    printf("Binarizing dataset with %zu bits per input\n", model.bits_per_input);
+    binarize_mnist(model.bits_per_input);
+
+    print_binarized_mnist_image(7555, 2);
+
+    printf("Testing with bleach %d\n", model.bleach);
+
+    size_t batch_size = 30;
+    size_t agree = 0;
+
+    size_t* results = calloc(batch_size, sizeof(*results));
+    size_t* results_batch = calloc(batch_size, sizeof(*results_batch));
+
+    batch_prediction(results_batch, &model, &binarized_test, batch_size);
+
+    for(size_t sample_it = 0; sample_it < batch_size; ++sample_it) {
+        results[sample_it] = model_predict2(&model, MATRIX_AXIS1(binarized_test, sample_it));
+        agree += (results[sample_it] == results_batch[sample_it]);
+    }
+    printf("Agreeing: %lf%%\n", 100 * ((double) agree) / batch_size);
+}
+
 int main(int argc, char *argv[]) {                              
 
     /* Error Checking */
@@ -122,8 +156,10 @@ int main(int argc, char *argv[]) {
         train();
     else if(argv[1][0] == '1')
         load_and_test();
-    else
+    else if(argv[1][0] == '2')
         compare();
+    else
+        test_batching();
 
     return 0;
 }

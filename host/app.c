@@ -33,9 +33,39 @@
 #endif
 
 // Pointer declaration
+static model_t model;
 static tensor3d_t hashes;
-static size_t* results;
-static size_t* results_host;
+static uint64_t* results;
+static uint64_t* results_host;
+
+void transfer_data_to_dpus(struct dpu_set_t dpu_set, unsigned int model_bytes, unsigned int hashes_bytes_per_dpu, unsigned int hashes_size_per_dpu_aligned) {
+    unsigned int each_dpu = 0;
+    struct dpu_set_t dpu;
+
+    printf("Broadcast model \n");
+
+    DPU_ASSERT(dpu_broadcast_to(dpu_set, DPU_MRAM_HEAP_POINTER_NAME, 0, model.data.data, model_bytes, DPU_XFER_DEFAULT));
+
+    printf("Parallel hashes push \n");
+
+    DPU_FOREACH(dpu_set, dpu, each_dpu) {
+        DPU_ASSERT(dpu_prepare_xfer(dpu, hashes.data + each_dpu * hashes_size_per_dpu_aligned));
+    }
+    DPU_ASSERT(dpu_push_xfer(dpu_set, DPU_XFER_TO_DPU, DPU_MRAM_HEAP_POINTER_NAME, model_bytes, hashes_bytes_per_dpu, DPU_XFER_DEFAULT));
+
+}
+
+void retrieve_data_from_dpus(struct dpu_set_t dpu_set) {
+    unsigned int each_dpu = 0;
+    struct dpu_set_t dpu;
+
+    printf("Parallel results pull \n");
+
+    DPU_FOREACH(dpu_set, dpu, each_dpu) {
+        DPU_ASSERT(dpu_prepare_xfer(dpu, &results[each_dpu]));
+    }
+    DPU_ASSERT(dpu_push_xfer(dpu_set, DPU_XFER_FROM_DPU, "DPU_PREDICTION", 0, sizeof(uint64_t), DPU_XFER_DEFAULT));
+}
 
 // Main of the Host Application
 int main(int argc, char **argv) {
@@ -64,7 +94,6 @@ int main(int argc, char **argv) {
     // Load model
     printf("Loading model\n");
          
-    model_t model;
     read_model(MODEL_PATH, &model);
 
     // Loading+Binarizing dataset
@@ -78,8 +107,8 @@ int main(int argc, char **argv) {
 
     // Calculate model size
     const unsigned int model_entries = model.filter_entries * model.num_filters * model.num_classes;
-    const unsigned int model_entries_8bytes = 
-        ((model_entries * sizeof(entry_t)) % 8) != 0 ? roundup(model_entries, 8) : model_entries;
+    const unsigned int model_entry_bytes = sizeof(entry_t);
+    const unsigned int model_entries_aligned = aligned_count(model_entries, model_entry_bytes);
 
     // Calculate input size
     const unsigned int num_samples = p.num_samples;
@@ -87,20 +116,20 @@ int main(int argc, char **argv) {
 
     const unsigned int hashes_per_image = model.num_filters * model.filter_hashes;
     const unsigned int dpu_num_hashes = hashes_per_image * dpu_num_samples;
-    const unsigned int dpu_num_hashes_8bytes = 
-        ((dpu_num_hashes * sizeof(entry_t)) % 8) != 0 ? roundup(dpu_num_hashes, 8) : dpu_num_hashes;
+    const unsigned hash_bytes = sizeof(entry_t);
+    const unsigned int dpu_num_hashes_aligned = aligned_count(dpu_num_hashes, hash_bytes);
 
     // Input/output allocation in host main memory
     tensor_init(&hashes, num_samples, model.num_filters, model.filter_hashes);
-    results = (size_t*) calloc(num_samples, sizeof(*results));
+    results = (uint64_t *) calloc(nr_of_dpus, sizeof(*results));
+    results_host = (uint64_t *) calloc(nr_of_dpus, sizeof(*results_host));
 
     unsigned int i = 0;
 
-    const unsigned int model_bytes_per_dpu = model_entries_8bytes * sizeof(*model.data.data);
-    const unsigned int model_bytes_total = model_bytes_per_dpu * nr_of_dpus;
+    const unsigned int model_bytes = model_entries_aligned * sizeof(*model.data.data);
 
-    const unsigned int bytes_per_dpu =  dpu_num_hashes_8bytes * sizeof(entry_t);
-    const unsigned int bytes_total = bytes_per_dpu * nr_of_dpus;
+    const unsigned int hashes_bytes_per_dpu =  dpu_num_hashes_aligned * sizeof(entry_t);
+    const unsigned int hashes_bytes_total = hashes_bytes_per_dpu * nr_of_dpus;
 
     unsigned int each_dpu = 0;
 
@@ -114,20 +143,27 @@ int main(int argc, char **argv) {
         if(rep >= p.n_warmup)
             start(&timer, 0, rep - p.n_warmup);
         
-        batch_prediction(results_host, model, &test_images, num_samples);
+        batch_prediction(results_host, &model, &test_images, num_samples);
         if(rep >= p.n_warmup)
             stop(&timer, 0);
 
-        printf("Load input data\n");
+        printf("Load DPU arguments\n");
         // Input arguments
         unsigned int kernel = 0;
-        dpu_arguments_t input_arguments[NR_DPUS];
-        for(i=0; i<nr_of_dpus-1; i++) {
-            input_arguments[i].input_size_bytes=dpu_num_hashes_8bytes * sizeof(entry_t); 
+        dpu_params_t input_arguments[NR_DPUS];
+        for(i = 0; i < nr_of_dpus; i++) {
+            input_arguments[i].input_size_bytes=hashes_bytes_per_dpu; 
+            input_arguments[i].model_size_bytes=model_bytes;
             input_arguments[i].kernel=kernel;
+            input_arguments[i].model_params = (dpu_model_params_t) {
+                .num_classes = model.num_classes,
+                .num_filters = model.num_filters,
+                .filter_inputs = model.filter_inputs,
+                .filter_entries = model.filter_entries,
+                .filter_hashes = model.filter_hashes,
+                .bleach = model.bleach
+            };
         }
-        input_arguments[nr_of_dpus-1].input_size_bytes=(input_size_8bytes - dpu_num_hashes_8bytes * (NR_DPUS-1)) * sizeof(entry_t); 
-        input_arguments[nr_of_dpus-1].kernel=kernel;
 
         if(rep >= p.n_warmup)
             start(&timer, 1, rep - p.n_warmup); // Start timer (CPU-DPU transfers)
@@ -139,42 +175,8 @@ int main(int argc, char **argv) {
         }
         DPU_ASSERT(dpu_push_xfer(dpu_set, DPU_XFER_TO_DPU, "DPU_INPUT_ARGUMENTS", 0, sizeof(input_arguments[0]), DPU_XFER_DEFAULT));
 
-        // Copy input arrays
-#ifdef SERIAL // Serial transfers
+        transfer_data_to_dpus(dpu_set, model_bytes, hashes_bytes_per_dpu, dpu_num_hashes_aligned);
 
-        printf("Serial push \n");
-
-        //@@ INSERT SERIAL CPU-DPU TRANSFER HERE
-
-        DPU_FOREACH(dpu_set, dpu, each_dpu) {
-            DPU_ASSERT(dpu_prepare_xfer(dpu, bufferX + input_size_dpu_8bytes * each_dpu));
-            DPU_ASSERT(dpu_push_xfer(dpu, DPU_XFER_TO_DPU, DPU_MRAM_HEAP_POINTER_NAME, 0, bytes_per_dpu, DPU_XFER_DEFAULT));
-        }
-
-        DPU_FOREACH(dpu_set, dpu, each_dpu) {
-            DPU_ASSERT(dpu_prepare_xfer(dpu, bufferY + input_size_dpu_8bytes * each_dpu));
-            DPU_ASSERT(dpu_push_xfer(dpu, DPU_XFER_TO_DPU, DPU_MRAM_HEAP_POINTER_NAME, bytes_per_dpu, bytes_per_dpu, DPU_XFER_DEFAULT));
-        }
-
-#else // Parallel transfers
-
-        printf("Parallel push \n");
-
-        //@@ INSERT PARALLEL CPU-DPU TRANSFER HERE
-        // Transfer X then Y in parallel
-        // Attempts to do all in one go result in incorrect transfer, might be possible tho
-
-        DPU_FOREACH(dpu_set, dpu, each_dpu) {
-            DPU_ASSERT(dpu_prepare_xfer(dpu, bufferX + input_size_dpu_8bytes * each_dpu));
-        }
-        DPU_ASSERT(dpu_push_xfer(dpu_set, DPU_XFER_TO_DPU, DPU_MRAM_HEAP_POINTER_NAME, 0, bytes_per_dpu, DPU_XFER_DEFAULT));
-
-        DPU_FOREACH(dpu_set, dpu, each_dpu) {
-            DPU_ASSERT(dpu_prepare_xfer(dpu, bufferY + input_size_dpu_8bytes * each_dpu));
-        }
-        DPU_ASSERT(dpu_push_xfer(dpu_set, DPU_XFER_TO_DPU, DPU_MRAM_HEAP_POINTER_NAME, bytes_per_dpu, bytes_per_dpu, DPU_XFER_DEFAULT));
-
-#endif
         if(rep >= p.n_warmup)
             stop(&timer, 1); // Stop timer (CPU-DPU transfers)
 		
@@ -204,27 +206,9 @@ int main(int argc, char **argv) {
         if(rep >= p.n_warmup)
             start(&timer, 3, rep - p.n_warmup); // Start timer (DPU-CPU transfers)
         i = 0;
-        // Copy output array
-#ifdef SERIAL // Serial transfers
 
-        printf("Serial pull \n");
+        retrieve_data_from_dpus(dpu_set);
 
-        //@@ INSERT SERIAL DPU-CPU TRANSFER HERE
-        DPU_FOREACH(dpu_set, dpu, each_dpu) {
-            DPU_ASSERT(dpu_copy_from(dpu, DPU_MRAM_HEAP_POINTER_NAME, bytes_per_dpu, bufferY + input_size_dpu_8bytes * each_dpu, bytes_per_dpu));
-        }
-
-#else // Parallel transfers
-
-        printf("Parallel pull \n");
-
-        //@@ INSERT PARALLEL DPU-CPU TRANSFER HERE
-        DPU_FOREACH(dpu_set, dpu, each_dpu) {
-            DPU_ASSERT(dpu_prepare_xfer(dpu, bufferY + input_size_dpu_8bytes * each_dpu));
-        }
-        DPU_ASSERT(dpu_push_xfer(dpu_set, DPU_XFER_FROM_DPU, DPU_MRAM_HEAP_POINTER_NAME, bytes_per_dpu, bytes_per_dpu, DPU_XFER_DEFAULT));
-
-#endif
         if(rep >= p.n_warmup)
             stop(&timer, 3); // Stop timer (DPU-CPU transfers)
 
@@ -287,10 +271,10 @@ int main(int argc, char **argv) {
 
     // Check output
     bool status = true;
-    for (i = 0; i < input_size; i++) {
-        if(Y_host[i] != Y[i]){ 
+    for (i = 0; i < model.num_classes; i++) {
+        if(results_host[i] != results[i]) {
             status = false;
-            printf("%d: %u -- %u\n", i, Y_host[i], Y[i]);
+            printf("%d. %u (expect. %u) \n", i, results_host[i], results[i]);
         }
     }
     if (status) {
@@ -300,9 +284,9 @@ int main(int argc, char **argv) {
     }
 
     // Deallocation
-    free(X);
-    free(Y);
-    free(Y_host);
+    // free(X);
+    // free(Y);
+    // free(Y_host);
     DPU_ASSERT(dpu_free(dpu_set)); // Deallocate DPUs
 	
     return status ? 0 : -1;
