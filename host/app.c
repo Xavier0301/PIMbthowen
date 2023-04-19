@@ -32,6 +32,14 @@
 #define MODEL_PATH "./model.dat"
 #endif
 
+#ifndef NR_DPUS
+#define NR_DPUS 1
+#endif
+
+#ifndef NR_TASKLETS
+#define NR_TASKLETS 1
+#endif
+
 // Pointer declaration
 static model_t model;
 static tensor3d_t hashes;
@@ -41,6 +49,8 @@ static uint64_t* results_host;
 void transfer_data_to_dpus(struct dpu_set_t dpu_set, unsigned int model_bytes, unsigned int hashes_bytes_per_dpu, unsigned int hashes_size_per_dpu_aligned) {
     unsigned int each_dpu = 0;
     struct dpu_set_t dpu;
+
+    printf("model size: %d bytes.\thashes size: %d bytes.\n", model_bytes, hashes_bytes_per_dpu);
 
     printf("Broadcast model \n");
 
@@ -103,7 +113,7 @@ int main(int argc, char **argv) {
     printf("Binarizing dataset with %zu bits per input\n", model.bits_per_input);
     binarize_mnist(model.bits_per_input);
 
-    print_binarized_mnist_image(7555, 2);
+    print_binarized_mnist_image(0, 2);
 
     // Calculate model size
     const unsigned int model_entries = model.filter_entries * model.num_filters * model.num_classes;
@@ -119,8 +129,8 @@ int main(int argc, char **argv) {
     const unsigned hash_bytes = sizeof(entry_t);
     const unsigned int dpu_num_hashes_aligned = aligned_count(dpu_num_hashes, hash_bytes);
 
-    printf("Input/output allocation in host main memory\n");
     // Input/output allocation in host main memory
+    printf("Input/output allocation in host main memory\n");
     tensor_init(&hashes, num_samples, model.num_filters, model.filter_hashes);
     results = (uint64_t *) calloc(nr_of_dpus, sizeof(*results));
     results_host = (uint64_t *) calloc(nr_of_dpus, sizeof(*results_host));
@@ -137,6 +147,7 @@ int main(int argc, char **argv) {
     printf("Batch hashing\n");
     // Create hashes to be transfered to the UpMem DPUs.
     batch_hashing(&hashes, &model, &binarized_test, num_samples);
+    print_binarized_mnist_image(0, 2);
 
     // Loop over main kernel
     for(int rep = 0; rep < p.n_warmup + p.n_reps; rep++) {
