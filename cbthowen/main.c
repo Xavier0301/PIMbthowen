@@ -147,7 +147,11 @@ int main(int argc, char *argv[]) {
 
     /* Error Checking */
     if(argc < 2) {
-        printf("Error: usage: %s <0/1>.\n   0 is for training from scratch\n    1 is for loading model.dat and testing\n",
+        printf("Error: usage: %s 0..3.\n\t \
+        0 is for training from scratch\n\t \
+        1 is for loading model.dat and testing\n\t \
+        2 is for comparing predict1 and predict2\n\t \
+        3 is for testing batching\n",
                 argv[0]);
         exit(1);
     }

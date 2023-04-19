@@ -119,6 +119,7 @@ int main(int argc, char **argv) {
     const unsigned hash_bytes = sizeof(entry_t);
     const unsigned int dpu_num_hashes_aligned = aligned_count(dpu_num_hashes, hash_bytes);
 
+    printf("Input/output allocation in host main memory\n");
     // Input/output allocation in host main memory
     tensor_init(&hashes, num_samples, model.num_filters, model.filter_hashes);
     results = (uint64_t *) calloc(nr_of_dpus, sizeof(*results));
@@ -133,8 +134,9 @@ int main(int argc, char **argv) {
 
     unsigned int each_dpu = 0;
 
+    printf("Batch hashing\n");
     // Create hashes to be transfered to the UpMem DPUs.
-    batch_hashing(&hashes, &model, &test_images, num_samples);
+    batch_hashing(&hashes, &model, &binarized_test, num_samples);
 
     // Loop over main kernel
     for(int rep = 0; rep < p.n_warmup + p.n_reps; rep++) {
@@ -142,8 +144,9 @@ int main(int argc, char **argv) {
         // Compute output on CPU (verification purposes)
         if(rep >= p.n_warmup)
             start(&timer, 0, rep - p.n_warmup);
-        
-        batch_prediction(results_host, &model, &test_images, num_samples);
+
+        printf("Batch prediction\n");
+        batch_prediction(results_host, &model, &binarized_test, num_samples);
         if(rep >= p.n_warmup)
             stop(&timer, 0);
 

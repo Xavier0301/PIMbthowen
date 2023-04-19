@@ -4,8 +4,14 @@ element_t* reorder_buffer;
 matrix_t hashes_buffer; // used in predict2
 
 void reorder_array(element_t* result, element_t* input, size_t* order, size_t len) {
-    for(size_t it = 0; it < len; ++it)
-        result[it] = input[order[it]];
+    for(size_t it = 0; it < len; ++it) {
+        printf("it %d. order access.\n", it);
+        size_t o = order[it];
+        printf("       input access.\n");
+        element_t tmp = input[o];
+        printf("       reorder buffer access.\n");
+        result[it] = tmp;
+    }
 }
 
 void randomize_input_order(size_t* input_order, size_t len) {
@@ -172,9 +178,11 @@ void perform_hashing(matrix_t resulting_hashes, model_t* model, element_t* input
 
 size_t model_predict2(model_t* model, element_t* input) {
     // Reorder
+    printf("reorder\n");
     reorder_array(reorder_buffer, input, model->input_order, model->num_inputs_total);
 
     // Hash
+    printf("hashing\n");
     perform_hashing(hashes_buffer, model, reorder_buffer);
 
     // Calculate popcounts for each discriminators
