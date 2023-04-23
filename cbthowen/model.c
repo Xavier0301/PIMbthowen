@@ -3,18 +3,9 @@
 element_t* reorder_buffer;
 matrix_t hashes_buffer; // used in predict2
 
-void reorder_array(element_t* result, element_t* input, size_t* order, size_t input_len) {
-    for(size_t it = 0; it < input_len; ++it) {
-        // printf("it %d. order access.\n", it);
-        size_t ord = order[it];
-        // printf("       input access.\n");
-        if(ord >= input_len) {
-            printf("order %zu, len %zu\n", ord, input_len);
-        }
-        element_t tmp = input[ord];
-        // printf("       reorder buffer access.\n");
-        result[it] = tmp;
-    }
+void reorder_array(element_t* result, element_t* input, size_t* order, size_t len) {
+    for(size_t it = 0; it < len; ++it)
+        result[it] = input[order[it]];
 }
 
 void randomize_input_order(size_t* input_order, size_t len) {
@@ -181,13 +172,15 @@ void perform_hashing(matrix_t resulting_hashes, model_t* model, element_t* input
 
 size_t model_predict2(model_t* model, element_t* input) {
     // Reorder
-    // printf("reorder\n");
     reorder_array(reorder_buffer, input, model->input_order, model->num_inputs_total);
 
     // Hash
-    // printf("hashing\n");
     perform_hashing(hashes_buffer, model, reorder_buffer);
 
+    return model_predict_backend(model, &hashes_buffer);
+}
+
+size_t model_predict_backend(model_t* model, matrix_t* hashes_buffer) {
     // Calculate popcounts for each discriminators
     entry_t popcounts[model->num_classes];
     for(size_t discr_it = 0; discr_it < model->num_classes; ++discr_it)
@@ -195,7 +188,7 @@ size_t model_predict2(model_t* model, element_t* input) {
 
     for(size_t filter_it = 0; filter_it < model->num_filters; ++filter_it) {
         for(size_t discr_it = 0; discr_it < model->num_classes; ++discr_it) {
-            entry_t resp = filter_reduction(TENSOR3D_AXIS2(model->data, discr_it, filter_it), MATRIX_AXIS1(hashes_buffer, filter_it), model->filter_hashes);
+            entry_t resp = filter_reduction(TENSOR3D_AXIS2(model->data, discr_it, filter_it), MATRIX_AXIS1(*hashes_buffer, filter_it), model->filter_hashes);
             popcounts[discr_it] += (resp >= model->bleach);
         }
     }
@@ -204,6 +197,7 @@ size_t model_predict2(model_t* model, element_t* input) {
     size_t response_index = 0;
     entry_t max_popcount = 0;
     for(size_t discr_it = 0; discr_it < model->num_classes; ++discr_it) {
+        printf("Discriminator %zu: %u\n", discr_it, popcounts[discr_it]);
         if(popcounts[discr_it] >= max_popcount) {
             max_popcount = popcounts[discr_it];
             response_index = discr_it;
@@ -212,4 +206,3 @@ size_t model_predict2(model_t* model, element_t* input) {
 
     return response_index;
 }
-

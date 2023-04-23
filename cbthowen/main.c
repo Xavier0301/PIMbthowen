@@ -76,7 +76,7 @@ void load_and_test() {
 
     size_t correct = 0;
     for(size_t sample_it = 0; sample_it < MNIST_NUM_TEST; ++sample_it) {
-        size_t class = model_predict(&model, MATRIX_AXIS1(binarized_test, sample_it));
+        size_t class = model_predict2(&model, MATRIX_AXIS1(binarized_test, sample_it));
         correct += (class == test_labels[sample_it]);
     }
 
@@ -143,15 +143,50 @@ void test_batching() {
     printf("Agreeing: %lf%%\n", 100 * ((double) agree) / batch_size);
 }
 
+void test_reordering_dataset() {
+    model_t model;
+
+    printf("Loading model\n");
+
+    read_model("model.dat", &model);
+
+    printf("Loading dataset\n");
+    load_mnist();
+
+    printf("Binarizing dataset with %zu bits per input\n", model.bits_per_input);
+    binarize_mnist(model.bits_per_input);
+
+    print_binarized_mnist_image(7555, 2);
+
+    printf("Reordering dataset\n");
+    reorder_binarized_mnist(model.input_order, model.bits_per_input);
+
+    printf("Testing with bleach %d\n", model.bleach);
+
+    size_t agree = 0;
+
+    unsigned char* reordered_sample = (unsigned char *) calloc(MNIST_IM_SIZE * model.bits_per_input, sizeof(*binarized_test.data));
+
+    for(size_t sample_it = 0; sample_it < MNIST_NUM_TEST; ++sample_it) {
+        reorder_array(reordered_sample, MATRIX_AXIS1(binarized_test, sample_it), model.input_order, model.num_inputs_total);
+        
+        if(memcmp(reordered_sample, MATRIX_AXIS1(reordered_binarized_test, sample_it), MNIST_IM_SIZE * model.bits_per_input * sizeof(*reordered_binarized_test.data)) == 0) {
+            agree += 1;
+        }
+    }
+    printf("Reorder agreeing: %lf%%\n", 100 * ((double) agree) / MNIST_NUM_TEST);
+}
+
 int main(int argc, char *argv[]) {                              
 
     /* Error Checking */
     if(argc < 2) {
-        printf("Error: usage: %s 0..3.\n\t \
+        printf("Error: usage: %s 0..4.\n\t \
         0 is for training from scratch\n\t \
         1 is for loading model.dat and testing\n\t \
         2 is for comparing predict1 and predict2\n\t \
-        3 is for testing batching\n",
+        3 is for testing batching\n\t \
+        4 if for testing reordering dataset\n",
                 argv[0]);
         exit(1);
     }
@@ -162,8 +197,10 @@ int main(int argc, char *argv[]) {
         load_and_test();
     else if(argv[1][0] == '2')
         compare();
-    else
+    else if(argv[1][0] == '3')
         test_batching();
+    else 
+        test_reordering_dataset();
 
     return 0;
 }

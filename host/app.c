@@ -107,6 +107,8 @@ int main(int argc, char **argv) {
          
     read_model(MODEL_PATH, &model);
 
+    printf("Model has bleach %d\n", model.bleach);
+
     // Loading+Binarizing dataset
     printf("Loading dataset\n");
     load_mnist();
@@ -115,6 +117,9 @@ int main(int argc, char **argv) {
     binarize_mnist(model.bits_per_input);
 
     print_binarized_mnist_image(0, 2);
+
+    printf("Reordering dataset\n");
+    reorder_binarized_mnist(model.input_order, model.bits_per_input);
 
     // Calculate model size
     const unsigned int model_entries = model.filter_entries * model.num_filters * model.num_classes;
@@ -145,12 +150,8 @@ int main(int argc, char **argv) {
 
     unsigned int each_dpu = 0;
 
-    // printf("Batch prediction\n");
-    // // print_binarized_mnist_image(0, 2);
-    // batch_prediction(results_host, &model, &binarized_test, num_samples);
-
     printf("Batch hashing\n");
-    batch_hashing(&hashes, &model, &binarized_test, num_samples);
+    batch_hashing(&hashes, &model, &reordered_binarized_test, num_samples);
 
     // Loop over main kernel
     for(int rep = 0; rep < p.n_warmup + p.n_reps; rep++) {
@@ -159,9 +160,7 @@ int main(int argc, char **argv) {
         if(rep >= p.n_warmup)
             start(&timer, 0, rep - p.n_warmup);
 
-        printf("Batch prediction\n");
-        // print_binarized_mnist_image(0, 2);
-        
+        printf("Batch prediction\n");        
         batch_prediction(results_host, &model, &binarized_test, num_samples);
         if(rep >= p.n_warmup)
             stop(&timer, 0);
@@ -294,7 +293,7 @@ int main(int argc, char **argv) {
     for (i = 0; i < num_samples; i++) {
         if(results_host[i] != results[i]) {
             status = false;
-            printf("Sample %d> %u -- %u_ \n", i, results_host[i], results[i]);
+            printf("Sample %d> %u -- %u_ \n", i, results[i], results_host[i]);
         }
     }
     if (status) {

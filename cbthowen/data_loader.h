@@ -9,6 +9,7 @@
 #include "distributions.h"
 
 #include "tensor.h"
+#include "model.h"
 
 // set appropriate path for data
 #define MNIST_TRAIN_IMAGE "./data/train-images-idx3-ubyte"
@@ -30,10 +31,16 @@ extern unsigned char* test_labels; // Of shape (#Samples,)
 extern bmatrix_t binarized_train; // Of shape (#Samples, 784 * bits_per_pixel)
 extern bmatrix_t binarized_test; // Of shape (#Samples, 784 * bits_per_pixel)
 
+extern bmatrix_t reordered_binarized_train; // Of shape (#Samples, 784 * bits_per_pixel)
+extern bmatrix_t reordered_binarized_test; // Of shape (#Samples, 784 * bits_per_pixel)
+
 void load_mnist();
 
 void binarize_matrix(bmatrix_t* result, bmatrix_t* dataset, size_t sample_size, size_t num_samples, size_t num_bits);
 void binarize_mnist(size_t num_bits);
+
+void reorder_dataset(bmatrix_t* result, bmatrix_t* dataset, size_t* order, size_t num_samples, size_t num_elements);
+void reorder_binarized_mnist(size_t* order, size_t num_bits);
 
 void print_binarized_mnist_image(size_t index, size_t num_bits);
 void print_mnist_image(size_t index);

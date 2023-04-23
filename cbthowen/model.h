@@ -73,6 +73,17 @@ size_t model_predict(model_t* model, element_t* input);
 size_t model_predict2(model_t* model, element_t* input);
 
 /**
+ * @brief Performs an inference with the provided HASHED input. 
+ * Used by  model_predict2 as the third stage after reordering and hashing
+ * 
+ * @param model 
+ * @param hashes_buffer 
+ * @return size_t 
+ */
+size_t model_predict_backend(model_t* model, matrix_t* hashes_buffer);
+
+
+/**
  * @brief Performs a training step (updating filter values) for all discriminators
  * @param model An initialized model
  * @param input A vector of boolean values representing the input sample

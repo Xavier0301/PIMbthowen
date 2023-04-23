@@ -8,6 +8,9 @@ unsigned char* test_labels; // Of shape (#Samples,)
 bmatrix_t binarized_train; // Of shape (#Samples, 784 * bits_per_pixel)
 bmatrix_t binarized_test; // Of shape (#Samples, 784 * bits_per_pixel)
 
+bmatrix_t reordered_binarized_train; // Of shape (#Samples, 784 * bits_per_pixel)
+bmatrix_t reordered_binarized_test; // Of shape (#Samples, 784 * bits_per_pixel)
+
 void reverse_bytes(uint32_t* element) {
     unsigned char tmp;
     char* ptr = (char*) element;
@@ -102,9 +105,9 @@ void print_mnist_image_(bmatrix_t* images, unsigned char* labels, size_t index, 
 void print_binarized_mnist_image(size_t index, size_t num_bits) {
     printf("Image %zu (Label %d) (Binarized)\n", index, train_labels[index]);
     for (size_t j = 0; j < MNIST_IM_SIZE; ++j) {
-        char value = *MATRIX(binarized_train, index, j * num_bits);
+        char value = *MATRIX(binarized_test, index, j * num_bits);
         for(size_t b = 1; b < num_bits; ++b)
-            value |= (*MATRIX(binarized_train, index, j * num_bits + b) << b);
+            value |= (*MATRIX(binarized_test, index, j * num_bits + b) << b);
 
         print_binarized_value(value, num_bits);
         if ((j+1) % 28 == 0) putchar('\n');
@@ -179,3 +182,20 @@ void fill_input_random(unsigned char* input, size_t input_length) {
         input[it] = rand() % 2;
     }
 }
+
+void reorder_dataset(bmatrix_t* result, bmatrix_t* dataset, size_t* order, size_t num_samples, size_t num_elements) {
+    for(size_t it = 0; it < num_samples; ++it) {
+        reorder_array(MATRIX_AXIS1(*result, it), MATRIX_AXIS1(*dataset, it), order, num_elements);
+    }
+}
+
+void reorder_binarized_mnist(size_t* order, size_t num_bits) {
+    // Allocating buffers
+    bmatrix_init(&reordered_binarized_train, MNIST_NUM_TRAIN, MNIST_IM_SIZE * num_bits);
+    bmatrix_init(&reordered_binarized_test, MNIST_NUM_TEST, MNIST_IM_SIZE * num_bits);
+
+    // Reordering
+    reorder_dataset(&reordered_binarized_train, &binarized_train, order, MNIST_NUM_TRAIN, MNIST_IM_SIZE * num_bits);
+    reorder_dataset(&reordered_binarized_test, &binarized_test, order, MNIST_NUM_TEST, MNIST_IM_SIZE * num_bits);
+}
+
