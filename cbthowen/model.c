@@ -3,12 +3,15 @@
 element_t* reorder_buffer;
 matrix_t hashes_buffer; // used in predict2
 
-void reorder_array(element_t* result, element_t* input, size_t* order, size_t len) {
-    for(size_t it = 0; it < len; ++it) {
+void reorder_array(element_t* result, element_t* input, size_t* order, size_t input_len) {
+    for(size_t it = 0; it < input_len; ++it) {
         // printf("it %d. order access.\n", it);
-        size_t o = order[it];
+        size_t ord = order[it];
         // printf("       input access.\n");
-        element_t tmp = input[o];
+        if(ord >= input_len) {
+            printf("order %zu, len %zu\n", ord, input_len);
+        }
+        element_t tmp = input[ord];
         // printf("       reorder buffer access.\n");
         result[it] = tmp;
     }

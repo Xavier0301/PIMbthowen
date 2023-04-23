@@ -41,10 +41,11 @@
 #endif
 
 // Pointer declaration
-static model_t model;
 static tensor3d_t hashes;
 static uint64_t* results;
 static uint64_t* results_host;
+static model_t model;
+
 
 void transfer_data_to_dpus(struct dpu_set_t dpu_set, unsigned int model_bytes, unsigned int hashes_bytes_per_dpu, unsigned int hashes_size_per_dpu_aligned) {
     unsigned int each_dpu = 0;
@@ -132,8 +133,8 @@ int main(int argc, char **argv) {
     // Input/output allocation in host main memory
     printf("Input/output allocation in host main memory\n");
     tensor_init(&hashes, num_samples, model.num_filters, model.filter_hashes);
-    results = (uint64_t *) calloc(nr_of_dpus, sizeof(*results));
-    results_host = (uint64_t *) calloc(nr_of_dpus, sizeof(*results_host));
+    results = (uint64_t *) calloc(num_samples, sizeof(*results));
+    results_host = (uint64_t *) calloc(num_samples, sizeof(*results_host));
 
     unsigned int i = 0;
 
@@ -144,10 +145,12 @@ int main(int argc, char **argv) {
 
     unsigned int each_dpu = 0;
 
+    // printf("Batch prediction\n");
+    // // print_binarized_mnist_image(0, 2);
+    // batch_prediction(results_host, &model, &binarized_test, num_samples);
+
     printf("Batch hashing\n");
-    // Create hashes to be transfered to the UpMem DPUs.
     batch_hashing(&hashes, &model, &binarized_test, num_samples);
-    print_binarized_mnist_image(0, 2);
 
     // Loop over main kernel
     for(int rep = 0; rep < p.n_warmup + p.n_reps; rep++) {
@@ -157,6 +160,8 @@ int main(int argc, char **argv) {
             start(&timer, 0, rep - p.n_warmup);
 
         printf("Batch prediction\n");
+        // print_binarized_mnist_image(0, 2);
+        
         batch_prediction(results_host, &model, &binarized_test, num_samples);
         if(rep >= p.n_warmup)
             stop(&timer, 0);
@@ -284,11 +289,12 @@ int main(int argc, char **argv) {
     print(&timer, 3, p.n_reps);
 
     // Check output
+    puts("");
     bool status = true;
-    for (i = 0; i < model.num_classes; i++) {
+    for (i = 0; i < num_samples; i++) {
         if(results_host[i] != results[i]) {
             status = false;
-            printf("%d. %u (expect. %u) \n", i, results_host[i], results[i]);
+            printf("Sample %d> %u -- %u_ \n", i, results_host[i], results[i]);
         }
     }
     if (status) {
