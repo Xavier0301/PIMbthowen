@@ -29,7 +29,9 @@ __host dpu_prediction_t DPU_PREDICTION;
 #define MODEL_FILTER_ADDR(p, base, discr, filter) (MODEL_DISCR_ADDR(p, base, discr) + (filter) * (p).filter_entries * sizeof(uint32_t))
 #define MODEL_BLOCK_ADDR(p, base, discr, filter, block) (MODEL_FILTER_ADDR(p, base, discr, filter) + (block) * MODEL_BLOCK_SIZE_B(p))
 
-#define HASHES_BLOCK_SIZE(p) (ROUND_UP_TO_MULTIPLE_OF_8((p).filter_hashes * sizeof(uint32_t)))
+// All hashes from a single sample are stored in WRAM
+#define HASHES_BLOCK_SIZE(p) (ROUND_UP_TO_MULTIPLE_OF_8((p).filter_hashes * (p).num_filters * sizeof(uint32_t)))
+#define HASHES_FILTER_PTR(p, base_ptr, filter) ((base_ptr) + (filter) * (p).filter_hashes)
 #define HASHES_FILTER_ADDR(p, base, filter) ((base) + (filter) * (p).filter_hashes * sizeof(uint32_t))
 
 // Barrier
@@ -80,6 +82,7 @@ int main_kernel1() {
     // Load model + input
     uint32_t model_size_dpu_bytes = DPU_INPUT_ARGUMENTS.model_size_bytes; // Transfer input size per DPU in bytes
     uint32_t input_size_dpu_bytes = DPU_INPUT_ARGUMENTS.input_size_bytes; // Input size per DPU in bytes
+    uint32_t nr_inputs = DPU_INPUT_ARGUMENTS.nr_inputs; // Number of inputs per DPU
 
     dpu_model_params_t model_params = DPU_INPUT_ARGUMENTS.model_params;
 
@@ -102,14 +105,16 @@ int main_kernel1() {
     printf("%u. Starting work\n", tasklet_id);
 #endif
 
+    mram_read(mram_base_addr_inputs, hashes_buffer, HASHES_BLOCK_SIZE(model_params));
+
     for(unsigned int filter_it = 0; filter_it < model_params.num_filters; ++filter_it) {
-        mram_read(HASHES_FILTER_ADDR(model_params, mram_base_addr_inputs, filter_it), hashes_buffer, HASHES_BLOCK_SIZE(model_params));
+        uint32_t* filter_hashes = HASHES_FILTER_PTR(model_params, hashes_buffer, filter_it);
         for(unsigned int discriminator_it = 0; discriminator_it < model_params.num_classes; ++discriminator_it) {
             for(unsigned int block_it = 0; block_it < MODEL_BLOCKS_PER_FILTER; ++block_it) {
                 mram_read(MODEL_BLOCK_ADDR(model_params, mram_base_addr_model, discriminator_it, filter_it, block_it), filter_buffer + MODEL_BLOCK_SIZE(model_params) * block_it, MODEL_BLOCK_SIZE_B(model_params));
             }
 
-            popcounts[discriminator_it] += (filter_reduction(filter_buffer, hashes_buffer, model_params.filter_hashes) >= model_params.bleach);
+            popcounts[discriminator_it] += (filter_reduction(filter_buffer, filter_hashes, model_params.filter_hashes) >= model_params.bleach);
         }
     }
 
@@ -137,6 +142,20 @@ int main_kernel1() {
 	
     return 0;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // Simply prints the content of the model data and hashes data
 int print_kernel() {

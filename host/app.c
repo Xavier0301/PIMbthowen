@@ -42,8 +42,8 @@
 
 // Pointer declaration
 static tensor3d_t hashes;
-static uint64_t* results;
-static uint64_t* results_host;
+static uint64_t* predictions;
+static uint64_t* predictions_host;
 static model_t model;
 
 
@@ -70,10 +70,10 @@ void retrieve_data_from_dpus(struct dpu_set_t dpu_set) {
     unsigned int each_dpu = 0;
     struct dpu_set_t dpu;
 
-    printf("Parallel results pull \n");
+    printf("Parallel prediction pull \n");
 
     DPU_FOREACH(dpu_set, dpu, each_dpu) {
-        DPU_ASSERT(dpu_prepare_xfer(dpu, &results[each_dpu]));
+        DPU_ASSERT(dpu_prepare_xfer(dpu, &predictions[each_dpu]));
     }
     DPU_ASSERT(dpu_push_xfer(dpu_set, DPU_XFER_FROM_DPU, "DPU_PREDICTION", 0, sizeof(uint64_t), DPU_XFER_DEFAULT));
 }
@@ -138,8 +138,8 @@ int main(int argc, char **argv) {
     // Input/output allocation in host main memory
     printf("Input/output allocation in host main memory\n");
     tensor_init(&hashes, num_samples, model.num_filters, model.filter_hashes);
-    results = (uint64_t *) calloc(num_samples, sizeof(*results));
-    results_host = (uint64_t *) calloc(num_samples, sizeof(*results_host));
+    predictions = (uint64_t *) calloc(num_samples, sizeof(*predictions));
+    predictions_host = (uint64_t *) calloc(num_samples, sizeof(*predictions_host));
 
     unsigned int i = 0;
 
@@ -161,7 +161,7 @@ int main(int argc, char **argv) {
             start(&timer, 0, rep - p.n_warmup);
 
         printf("Batch prediction\n");        
-        batch_prediction(results_host, &model, &binarized_test, num_samples);
+        batch_prediction(predictions_host, &model, &binarized_test, num_samples);
         if(rep >= p.n_warmup)
             stop(&timer, 0);
 
@@ -172,6 +172,7 @@ int main(int argc, char **argv) {
         for(i = 0; i < nr_of_dpus; i++) {
             input_arguments[i].input_size_bytes=hashes_bytes_per_dpu; 
             input_arguments[i].model_size_bytes=model_bytes;
+            input_arguments[i].nr_inputs=num_samples;
             input_arguments[i].kernel=kernel;
             input_arguments[i].model_params = (dpu_model_params_t) {
                 .num_classes = model.num_classes,
@@ -291,10 +292,11 @@ int main(int argc, char **argv) {
     puts("");
     bool status = true;
     for (i = 0; i < num_samples; i++) {
-        if(results_host[i] != results[i]) {
+        if(predictions_host[i] != predictions[i]) {
             status = false;
-            printf("Sample %d> %u -- %u_ \n", i, results[i], results_host[i]);
+            printf("Sample %d> %u -- %u_ \n", i, predictions[i], predictions_host[i]);
         }
+        // printf("Sample %d> %u -- %u_ \n", i, predictions[i], predictions_host[i]);
     }
     if (status) {
         printf("\n[" ANSI_COLOR_GREEN "OK" ANSI_COLOR_RESET "] Outputs are equal\n");
