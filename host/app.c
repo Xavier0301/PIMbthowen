@@ -66,16 +66,16 @@ void transfer_data_to_dpus(struct dpu_set_t dpu_set, unsigned int model_bytes, u
 
 }
 
-void retrieve_data_from_dpus(struct dpu_set_t dpu_set) {
+void retrieve_data_from_dpus(struct dpu_set_t dpu_set, unsigned int model_bytes, unsigned int hashes_bytes_per_dpu, unsigned int predictions_bytes_per_dpu, unsigned int predictions_per_dpu) {
     unsigned int each_dpu = 0;
     struct dpu_set_t dpu;
 
     printf("Parallel prediction pull \n");
 
     DPU_FOREACH(dpu_set, dpu, each_dpu) {
-        DPU_ASSERT(dpu_prepare_xfer(dpu, &predictions[each_dpu]));
+        DPU_ASSERT(dpu_prepare_xfer(dpu, &predictions[each_dpu * predictions_per_dpu]));
     }
-    DPU_ASSERT(dpu_push_xfer(dpu_set, DPU_XFER_FROM_DPU, "DPU_PREDICTION", 0, sizeof(uint64_t), DPU_XFER_DEFAULT));
+    DPU_ASSERT(dpu_push_xfer(dpu_set, DPU_XFER_FROM_DPU, DPU_MRAM_HEAP_POINTER_NAME, model_bytes + hashes_bytes_per_dpu, predictions_bytes_per_dpu, DPU_XFER_DEFAULT));
 }
 
 // Main of the Host Application
@@ -147,6 +147,9 @@ int main(int argc, char **argv) {
 
     const unsigned int hashes_bytes_per_dpu =  dpu_num_hashes_aligned * sizeof(entry_t);
     const unsigned int hashes_bytes_total = hashes_bytes_per_dpu * nr_of_dpus;
+
+    const unsigned int predictions_per_dpu = dpu_num_samples;
+    const unsigned int predictions_bytes_per_dpu = predictions_per_dpu * sizeof(uint64_t);
 
     unsigned int each_dpu = 0;
 
@@ -226,7 +229,7 @@ int main(int argc, char **argv) {
             start(&timer, 3, rep - p.n_warmup); // Start timer (DPU-CPU transfers)
         i = 0;
 
-        retrieve_data_from_dpus(dpu_set);
+        retrieve_data_from_dpus(dpu_set, model_bytes, hashes_bytes_per_dpu, predictions_bytes_per_dpu, predictions_per_dpu);
 
         if(rep >= p.n_warmup)
             stop(&timer, 3); // Stop timer (DPU-CPU transfers)

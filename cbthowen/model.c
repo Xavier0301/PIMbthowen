@@ -197,7 +197,7 @@ size_t model_predict_backend(model_t* model, matrix_t* hashes_buffer) {
     size_t response_index = 0;
     entry_t max_popcount = 0;
     for(size_t discr_it = 0; discr_it < model->num_classes; ++discr_it) {
-        printf("Discriminator %zu: %u\n", discr_it, popcounts[discr_it]);
+        // printf("Discriminator %zu: %u\n", discr_it, popcounts[discr_it]);
         if(popcounts[discr_it] >= max_popcount) {
             max_popcount = popcounts[discr_it];
             response_index = discr_it;

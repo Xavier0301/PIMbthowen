@@ -16,7 +16,6 @@
 // Input and output argumentsd
 __host dpu_params_t DPU_INPUT_ARGUMENTS;
 __host dpu_results_t DPU_RESULTS[NR_TASKLETS];
-__host dpu_prediction_t DPU_PREDICTION;
 
 #define MODEL_ENTRY_SIZE_B (sizeof(uint32_t))
 #define MODEL_FILTER_SIZE_B(p) ((p).filter_entries * MODEL_ENTRY_SIZE_B)
@@ -33,6 +32,8 @@ __host dpu_prediction_t DPU_PREDICTION;
 
 #define HASHES_FILTER_PTR(p, base_ptr, filter) ((base_ptr) + (filter) * (p).filter_hashes)
 #define HASHES_ENTRY_PTR(p, base_ptr, filter, hash_idx) (HASHES_FILTER_PTR(p, base_ptr, filter) + (hash_idx))
+
+#define PREDICTION_ADDR(p, base, sample) ((base) + (sample) * sizeof(uint64_t))
 
 // Barrier
 BARRIER_INIT(my_barrier, NR_TASKLETS);
@@ -86,6 +87,7 @@ int main_kernel1() {
 
     uint32_t mram_base_addr_model = (uint32_t) (DPU_MRAM_HEAP_POINTER);
     uint32_t mram_base_addr_inputs = (uint32_t) (mram_base_addr_model + model_size_dpu_bytes);
+    uint32_t mram_base_addr_predictions = (uint32_t) (mram_base_addr_inputs + input_size_dpu_bytes);
 
     // Each tasklet only needs to store one filter element in mram
     uint32_t* filter_buffer = (uint32_t*) mem_alloc(ROUND_UP_TO_MULTIPLE_OF_8(sizeof(*filter_buffer)));
@@ -98,55 +100,59 @@ int main_kernel1() {
     printf("%u. Starting work\n", tasklet_id);
 #endif
 
-    // for(unsigned int sample_it = tasklet_id; sample_it < nr_inputs; sample_it += NR_TASKLETS) {
+    for(unsigned int sample_it = tasklet_id; sample_it < nr_inputs; sample_it += NR_TASKLETS) {
 
-    mram_read(HASHES_SAMPLE_ADDR(model_params, mram_base_addr_inputs, 0), hashes_buffer, ROUND_UP_TO_MULTIPLE_OF_8(HASHES_BLOCK_SIZE_B(model_params)));
+        mram_read(HASHES_SAMPLE_ADDR(model_params, mram_base_addr_inputs, sample_it), hashes_buffer, ROUND_UP_TO_MULTIPLE_OF_8(HASHES_BLOCK_SIZE_B(model_params)));
 
-    for(unsigned int filter_it = 0; filter_it < model_params.num_filters; ++filter_it) {
-        uint32_t* hashes_filter_buffer = HASHES_FILTER_PTR(model_params, hashes_buffer, filter_it);
-        for(unsigned int discriminator_it = 0; discriminator_it < model_params.num_classes; ++discriminator_it) {
-            // for(unsigned int block_it = 0; block_it < MODEL_BLOCKS_PER_FILTER; ++block_it) {
-            //     mram_read(MODEL_BLOCK_ADDR(model_params, mram_base_addr_model, discriminator_it, filter_it, block_it), filter_buffer + MODEL_BLOCK_SIZE(model_params) * block_it, MODEL_BLOCK_SIZE_B(model_params));
-            // }
+        for(unsigned int discriminator_it = 0; discriminator_it < model_params.num_classes; ++discriminator_it) 
+            popcounts[discriminator_it] = 0;
 
-            // (filter_reduction(filter_buffer, filter_hashes, model_params.filter_hashes)
+        for(unsigned int filter_it = 0; filter_it < model_params.num_filters; ++filter_it) {
+            uint32_t* hashes_filter_buffer = HASHES_FILTER_PTR(model_params, hashes_buffer, filter_it);
+            for(unsigned int discriminator_it = 0; discriminator_it < model_params.num_classes; ++discriminator_it) {
+                // for(unsigned int block_it = 0; block_it < MODEL_BLOCKS_PER_FILTER; ++block_it) {
+                //     mram_read(MODEL_BLOCK_ADDR(model_params, mram_base_addr_model, discriminator_it, filter_it, block_it), filter_buffer + MODEL_BLOCK_SIZE(model_params) * block_it, MODEL_BLOCK_SIZE_B(model_params));
+                // }
 
-            uint32_t min = -1;
-            for(size_t hash_it = 0; hash_it < model_params.filter_hashes; ++hash_it) {
-                uint32_t hash = hashes_filter_buffer[hash_it];
+                // (filter_reduction(filter_buffer, filter_hashes, model_params.filter_hashes)
 
-                uint32_t model_entry_addr = MODEL_ENTRY_ADDR(model_params, mram_base_addr_model, discriminator_it, filter_it, hash);
-                uint32_t aligned_addr = ROUND_DOWN_TO_MULTIPLE_OF_8(model_entry_addr);
-                uint32_t offset = (model_entry_addr - aligned_addr) / sizeof(*filter_buffer);
-                
-                mram_read(aligned_addr, filter_buffer, ROUND_UP_TO_MULTIPLE_OF_8(sizeof(*filter_buffer)));
-#if PRINT
-                printf("%u. Hash %u: %u\n", tasklet_id, hash_it, hash);
-                printf("%u. Model entry address: %u (%u)\n", tasklet_id, aligned_addr, offset);
-                printf("%u. Model entry: %u (%u)\n", tasklet_id, filter_buffer[offset], filter_buffer[1-offset]);
-#endif
-                uint32_t entry = filter_buffer[offset];
-                if(entry <= min) min = entry;
+                uint32_t min = -1;
+                for(size_t hash_it = 0; hash_it < model_params.filter_hashes; ++hash_it) {
+                    uint32_t hash = hashes_filter_buffer[hash_it];
+
+                    uint32_t model_entry_addr = MODEL_ENTRY_ADDR(model_params, mram_base_addr_model, discriminator_it, filter_it, hash);
+                    uint32_t aligned_addr = ROUND_DOWN_TO_MULTIPLE_OF_8(model_entry_addr);
+                    uint32_t offset = (model_entry_addr - aligned_addr) / sizeof(*filter_buffer);
+                    
+                    mram_read(aligned_addr, filter_buffer, ROUND_UP_TO_MULTIPLE_OF_8(sizeof(*filter_buffer)));
+    // #if PRINT
+    //                 printf("%u. Hash %u: %u\n", tasklet_id, hash_it, hash);
+    //                 printf("%u. Model entry address: %u (%u)\n", tasklet_id, aligned_addr, offset);
+    //                 printf("%u. Model entry: %u (%u)\n", tasklet_id, filter_buffer[offset], filter_buffer[1-offset]);
+    // #endif
+                    uint32_t entry = filter_buffer[offset];
+                    if(entry <= min) min = entry;
+                }
+
+                popcounts[discriminator_it] += (min >= model_params.bleach);
             }
-
-            popcounts[discriminator_it] += (min >= model_params.bleach);
         }
-    }
-    // }
 
-    uint32_t max_pcount = 0;
-    uint64_t argmax_pcount = 0;
-    for(unsigned int discriminator_it = 0; discriminator_it < model_params.num_classes; ++discriminator_it) {
+        uint32_t max_pcount = 0;
+        uint64_t argmax_pcount = 0;
+        for(unsigned int discriminator_it = 0; discriminator_it < model_params.num_classes; ++discriminator_it) {
 #if PRINT
-        printf("%u. Popcount %u: %u\n", tasklet_id, discriminator_it, popcounts[discriminator_it]);
+            printf("%u. Popcount %u: %u\n", tasklet_id, discriminator_it, popcounts[discriminator_it]);
 #endif
-        if(popcounts[discriminator_it] >= max_pcount) {
-            max_pcount = popcounts[discriminator_it];
-            argmax_pcount = discriminator_it;
+            if(popcounts[discriminator_it] >= max_pcount) {
+                max_pcount = popcounts[discriminator_it];
+                argmax_pcount = discriminator_it;
+            }
         }
+        mram_write(&argmax_pcount, PREDICTION_ADDR(model_params, mram_base_addr_predictions, sample_it), sizeof(argmax_pcount));
     }
 
-    DPU_PREDICTION.prediction = argmax_pcount;
+    // DPU_PREDICTION.prediction = argmax_pcount;
 
 #if PRINT
     printf("%u. Work done\n", tasklet_id);
@@ -254,8 +260,6 @@ int print_kernel() {
     //     }
     //     printf("\n\n");
     // }
-
-    DPU_PREDICTION.prediction = 0;
 
 #if defined(CYCLES) || defined(INSTRUCTIONS)
     result->count += counter_stop(&count); // STOP TIMER
