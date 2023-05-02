@@ -27,12 +27,12 @@ __host dpu_prediction_t DPU_PREDICTION;
 #define MODEL_ENTRY_ADDR(p, base, discr, filter, entry) (MODEL_FILTER_ADDR(p, base, discr, filter) + (entry) * MODEL_ENTRY_SIZE_B)
 
 // All hashes from a single sample are stored in WRAM
-#define HASHES_BLOCK_SIZE(p) (ROUND_UP_TO_MULTIPLE_OF_8((p).filter_hashes * (p).num_filters))
+#define HASHES_BLOCK_SIZE(p) ((p).filter_hashes * (p).num_filters)
 #define HASHES_BLOCK_SIZE_B(p) (HASHES_BLOCK_SIZE(p) * sizeof(uint32_t))
 #define HASHES_SAMPLE_ADDR(p, base, sample) ((base) + (sample) * HASHES_BLOCK_SIZE_B(p))
 
 #define HASHES_FILTER_PTR(p, base_ptr, filter) ((base_ptr) + (filter) * (p).filter_hashes)
-
+#define HASHES_ENTRY_PTR(p, base_ptr, filter, hash_idx) (HASHES_FILTER_PTR(p, base_ptr, filter) + (hash_idx))
 
 // Barrier
 BARRIER_INIT(my_barrier, NR_TASKLETS);
@@ -103,8 +103,7 @@ int main_kernel1() {
     mram_read(HASHES_SAMPLE_ADDR(model_params, mram_base_addr_inputs, 0), hashes_buffer, ROUND_UP_TO_MULTIPLE_OF_8(HASHES_BLOCK_SIZE_B(model_params)));
 
     for(unsigned int filter_it = 0; filter_it < model_params.num_filters; ++filter_it) {
-        uint32_t* filter_hashes = HASHES_FILTER_PTR(model_params, hashes_buffer, filter_it);
-
+        uint32_t* hashes_filter_buffer = HASHES_FILTER_PTR(model_params, hashes_buffer, filter_it);
         for(unsigned int discriminator_it = 0; discriminator_it < model_params.num_classes; ++discriminator_it) {
             // for(unsigned int block_it = 0; block_it < MODEL_BLOCKS_PER_FILTER; ++block_it) {
             //     mram_read(MODEL_BLOCK_ADDR(model_params, mram_base_addr_model, discriminator_it, filter_it, block_it), filter_buffer + MODEL_BLOCK_SIZE(model_params) * block_it, MODEL_BLOCK_SIZE_B(model_params));
@@ -114,9 +113,19 @@ int main_kernel1() {
 
             uint32_t min = -1;
             for(size_t hash_it = 0; hash_it < model_params.filter_hashes; ++hash_it) {
-                uint32_t hash = filter_hashes[hash_it];
-                mram_read(MODEL_ENTRY_ADDR(model_params, mram_base_addr_model, discriminator_it, filter_it, hash), filter_buffer, ROUND_UP_TO_MULTIPLE_OF_8(sizeof(uint32_t)));
-                uint32_t entry = filter_buffer[0];
+                uint32_t hash = hashes_filter_buffer[hash_it];
+
+                uint32_t model_entry_addr = MODEL_ENTRY_ADDR(model_params, mram_base_addr_model, discriminator_it, filter_it, hash);
+                uint32_t aligned_addr = ROUND_DOWN_TO_MULTIPLE_OF_8(model_entry_addr);
+                uint32_t offset = (model_entry_addr - aligned_addr) / sizeof(*filter_buffer);
+                
+                mram_read(aligned_addr, filter_buffer, ROUND_UP_TO_MULTIPLE_OF_8(sizeof(*filter_buffer)));
+#if PRINT
+                printf("%u. Hash %u: %u\n", tasklet_id, hash_it, hash);
+                printf("%u. Model entry address: %u (%u)\n", tasklet_id, aligned_addr, offset);
+                printf("%u. Model entry: %u (%u)\n", tasklet_id, filter_buffer[offset], filter_buffer[1-offset]);
+#endif
+                uint32_t entry = filter_buffer[offset];
                 if(entry <= min) min = entry;
             }
 

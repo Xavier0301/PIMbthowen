@@ -1,7 +1,8 @@
 #ifndef _COMMON_H_
 #define _COMMON_H_
 
-#define ROUND_UP_TO_MULTIPLE_OF_8(x)    ((((x) + 7)/8)*8)
+#define ROUND_UP_TO_MULTIPLE_OF_8(x)    ((((x) + 7) / 8) * 8)
+#define ROUND_DOWN_TO_MULTIPLE_OF_8(x)  (((x) / 8) * 8)
 
 typedef struct {
     uint32_t num_classes;
