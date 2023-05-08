@@ -54,82 +54,56 @@ void log_input_args(dpu_params_t input_arguments, size_t it) {
 
 void transfer_data_to_dpus(struct dpu_set_t dpu_set, 
     unsigned int nr_dpus, 
-    dpu_params_t* base_input_param, 
-    dpu_params_t* last_input_param) {
+    dpu_params_t* input_params, 
+    unsigned int dpu_model_transfer_size_bytes,
+    unsigned int dpu_input_transfer_size_bytes) {
 
     unsigned int each_dpu = 0;
     struct dpu_set_t dpu;
 
-    struct dpu_set_t last_dpu;
-
     printf("Broadcast model \n");
 
-    DPU_ASSERT(dpu_broadcast_to(dpu_set, DPU_MRAM_HEAP_POINTER_NAME, 0, model.data.data, base_input_param->model_size_bytes, DPU_XFER_DEFAULT));
+    DPU_ASSERT(dpu_broadcast_to(dpu_set, DPU_MRAM_HEAP_POINTER_NAME, 0, model.data.data, dpu_model_transfer_size_bytes, DPU_XFER_DEFAULT));
 
     printf("Parallel hashes push \n");
 
     DPU_FOREACH(dpu_set, dpu, each_dpu) {
-        DPU_ASSERT(dpu_prepare_xfer(dpu, TENSOR3D_AXIS1(hashes, each_dpu * base_input_param->nr_inputs)));
-        if(each_dpu == nr_dpus - 1) last_dpu = dpu;
+        DPU_ASSERT(dpu_prepare_xfer(dpu, TENSOR3D_AXIS1(hashes, each_dpu * input_params[each_dpu].nr_inputs)));
     }
     DPU_ASSERT(
         dpu_push_xfer(dpu_set, 
             DPU_XFER_TO_DPU, 
             DPU_MRAM_HEAP_POINTER_NAME, 
-            base_input_param->model_size_bytes, 
-            base_input_param->input_size_bytes, 
+            dpu_model_transfer_size_bytes,
+            dpu_input_transfer_size_bytes, 
             DPU_XFER_DEFAULT)
     );
-
-    // There are inputs yet to be sent in case of uneven repartition
-    if(last_input_param->nr_inputs - base_input_param->nr_inputs > 0) {
-        unsigned int num_sent_samples_total = base_input_param->nr_inputs * nr_dpus;
-        unsigned int num_sent_samples_single = base_input_param->nr_inputs;
-        unsigned int num_leftover_samples = last_input_param->nr_inputs - base_input_param->nr_inputs;
-
-        DPU_ASSERT(
-            dpu_copy_to(last_dpu, 
-                DPU_MRAM_HEAP_POINTER_NAME, 
-                base_input_param->model_size_bytes + base_input_param->input_size_bytes, 
-                TENSOR3D_AXIS1(hashes, num_sent_samples_total),
-                last_input_param->input_size_bytes - base_input_param->input_size_bytes)
-        );
-    }
 }
 
 void retrieve_data_from_dpus(struct dpu_set_t dpu_set, 
     unsigned int nr_dpus, 
-    dpu_params_t* base_input_param, 
-    dpu_params_t* last_input_param, 
-    unsigned int bytes_per_prediction) {
+    dpu_params_t* input_params, 
+    unsigned int dpu_model_transfer_size_bytes,
+    unsigned int dpu_input_transfer_size_bytes,
+    unsigned int dpu_output_transfer_size_bytes) {
 
     unsigned int each_dpu = 0;
     struct dpu_set_t dpu;
 
-    struct dpu_set_t last_dpu;
-
     printf("Prediction pull \n");
 
     DPU_FOREACH(dpu_set, dpu, each_dpu) {
-        DPU_ASSERT(dpu_prepare_xfer(dpu, predictions + each_dpu * base_input_param->nr_inputs));
-        if(each_dpu == nr_dpus - 1) last_dpu = dpu;
+        DPU_ASSERT(dpu_prepare_xfer(dpu, &predictions[each_dpu * input_params[each_dpu].nr_inputs]));
     }
 
-    DPU_ASSERT(dpu_push_xfer(dpu_set, DPU_XFER_FROM_DPU, DPU_MRAM_HEAP_POINTER_NAME, base_input_param->model_size_bytes + base_input_param->input_size_bytes, base_input_param->nr_inputs * bytes_per_prediction, DPU_XFER_DEFAULT));
-
-    // There are predictions yet to be retrieved in case of uneven repartition
-    if(last_input_param->nr_inputs - base_input_param->nr_inputs > 0) {
-        unsigned int num_retrieved_pred_total = base_input_param->nr_inputs * nr_dpus;
-        unsigned int num_retrieved_pred_single = base_input_param->nr_inputs;
-        unsigned int num_leftover_pred = last_input_param->nr_inputs - base_input_param->nr_inputs;
-        DPU_ASSERT(
-            dpu_copy_from(last_dpu, 
-                DPU_MRAM_HEAP_POINTER_NAME, 
-                last_input_param->model_size_bytes + last_input_param->input_size_bytes + num_retrieved_pred_single * bytes_per_prediction, 
-                &predictions[num_retrieved_pred_total],
-                num_leftover_pred * bytes_per_prediction)
-        );
-    }
+    DPU_ASSERT(
+        dpu_push_xfer(dpu_set, 
+            DPU_XFER_FROM_DPU, 
+            DPU_MRAM_HEAP_POINTER_NAME, 
+            dpu_model_transfer_size_bytes + dpu_input_transfer_size_bytes, 
+            dpu_output_transfer_size_bytes, 
+            DPU_XFER_DEFAULT)
+    );
 }
 
 // Main of the Host Application
@@ -187,19 +161,25 @@ printf("\n");
     printf("Reordering dataset\n");
     reorder_binarized_mnist(model.input_order, model.bits_per_input);
 
-    // Calculate model size
+    // Calculate model size (transfer size is identical to model size)
     const unsigned int model_entries = model.filter_entries * model.num_filters * model.num_classes;
     const unsigned int model_entry_bytes = sizeof(entry_t);
     const unsigned int model_entries_aligned = aligned_count(model_entries, model_entry_bytes);
 
-    // Calculate input size
+    // Input size calculations
     const unsigned int num_samples = p.num_samples;
-    const unsigned int dpu_num_samples = num_samples / nr_of_dpus;
+    const unsigned int dpu_num_samples_max = divceil(num_samples, nr_of_dpus);
 
-    const unsigned int hashes_per_image = model.num_filters * model.filter_hashes;
-    const unsigned int dpu_num_hashes = hashes_per_image * dpu_num_samples;
-    const unsigned hash_entry_bytes = sizeof(entry_t);
-    const unsigned int dpu_num_hashes_aligned = aligned_count(dpu_num_hashes, hash_entry_bytes);
+    const unsigned int hashes_per_sample = model.num_filters * model.filter_hashes;
+    const unsigned int dpu_num_hashes_max = hashes_per_sample * dpu_num_samples_max;
+    const unsigned bytes_per_hash = sizeof(entry_t);
+    const unsigned int bytes_per_sample = hashes_per_sample * bytes_per_hash;
+    const unsigned int dpu_num_hashes_max_aligned = aligned_count(dpu_num_hashes_max, bytes_per_hash);
+
+    // Output size calculations
+    const unsigned int dpu_num_preds_max = dpu_num_samples_max;
+    const unsigned int bytes_per_prediction = sizeof(uint64_t);
+    const unsigned int dpu_num_preds_max_aligned = aligned_count(dpu_num_preds_max, bytes_per_prediction);
 
     // Input/output allocation in host main memory
     printf("Input/output allocation in host main memory\n");
@@ -209,15 +189,10 @@ printf("\n");
 
     unsigned int i = 0;
 
+    // Transfer sizes
     const unsigned int model_bytes = model_entries_aligned * model_entry_bytes;
-
-    const unsigned int hashes_bytes_per_dpu =  dpu_num_hashes_aligned * hash_entry_bytes;
-    const unsigned int hashes_bytes_total = num_samples * hashes_per_image * hash_entry_bytes;
-
-    const unsigned int predictions_per_dpu = dpu_num_samples;
-    const unsigned int prediction_entry_bytes = sizeof(uint64_t);
-    const unsigned int prediction_bytes_per_dpu = predictions_per_dpu * prediction_entry_bytes;
-    const unsigned int prediction_bytes_total = num_samples * prediction_entry_bytes;
+    const unsigned int dpu_input_transfer_size_bytes =  dpu_num_hashes_max_aligned * bytes_per_hash;
+    const unsigned int dpu_output_transfer_size_bytes = dpu_num_preds_max_aligned * bytes_per_prediction;
 
     unsigned int each_dpu = 0;
 
@@ -254,10 +229,10 @@ printf("\n");
                 .model_size_bytes = model_bytes,
 
                 .input_size_bytes = dpu_num_samples * bytes_per_sample,
-                .input_transfer_size_bytes = dpu_input_transfer_size,
+                .input_transfer_size_bytes = dpu_input_transfer_size_bytes,
 
                 .output_size_bytes = dpu_num_samples * bytes_per_prediction,
-                .output_transfer_size_bytes = dpu_output_transfer_size,
+                .output_transfer_size_bytes = dpu_output_transfer_size_bytes,
 
                 .nr_inputs = dpu_num_samples,
 
@@ -278,7 +253,7 @@ printf("\n");
         }
         DPU_ASSERT(dpu_push_xfer(dpu_set, DPU_XFER_TO_DPU, "DPU_INPUT_ARGUMENTS", 0, sizeof(input_arguments[0]), DPU_XFER_DEFAULT));
 
-        transfer_data_to_dpus(dpu_set, nr_of_dpus, &base_input_argument, &last_input_argument);
+        transfer_data_to_dpus(dpu_set, nr_of_dpus, input_arguments, model_bytes, dpu_input_transfer_size_bytes);
 
         if(rep >= p.n_warmup)
             stop(&timer, 1); // Stop timer (CPU-DPU transfers)
@@ -310,7 +285,7 @@ printf("\n");
             start(&timer, 3, rep - p.n_warmup); // Start timer (DPU-CPU transfers)
         i = 0;
 
-        retrieve_data_from_dpus(dpu_set, nr_of_dpus, &base_input_argument, &last_input_argument, prediction_entry_bytes);
+        retrieve_data_from_dpus(dpu_set, nr_of_dpus, input_arguments, model_bytes, dpu_input_transfer_size_bytes, dpu_output_transfer_size_bytes);
 
         if(rep >= p.n_warmup)
             stop(&timer, 3); // Stop timer (DPU-CPU transfers)
