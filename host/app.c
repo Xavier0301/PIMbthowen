@@ -67,8 +67,10 @@ void transfer_data_to_dpus(struct dpu_set_t dpu_set,
 
     printf("Parallel hashes push \n");
 
+    unsigned int sample_it = 0;
     DPU_FOREACH(dpu_set, dpu, each_dpu) {
-        DPU_ASSERT(dpu_prepare_xfer(dpu, TENSOR3D_AXIS1(hashes, each_dpu * input_params[each_dpu].nr_inputs)));
+        DPU_ASSERT(dpu_prepare_xfer(dpu, TENSOR3D_AXIS1(hashes, sample_it)));
+        sample_it += input_params[each_dpu].nr_inputs;
     }
     DPU_ASSERT(
         dpu_push_xfer(dpu_set, 
@@ -92,8 +94,10 @@ void retrieve_data_from_dpus(struct dpu_set_t dpu_set,
 
     printf("Prediction pull \n");
 
+    unsigned int pred_it = 0;
     DPU_FOREACH(dpu_set, dpu, each_dpu) {
-        DPU_ASSERT(dpu_prepare_xfer(dpu, &predictions[each_dpu * input_params[each_dpu].nr_inputs]));
+        DPU_ASSERT(dpu_prepare_xfer(dpu, &predictions[pred_it]));
+        pred_it += input_params[each_dpu].nr_inputs;
     }
 
     DPU_ASSERT(
