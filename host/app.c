@@ -49,7 +49,7 @@ static uint64_t* predictions_host; // (#SAMPLES)
 static model_t model; // WNN model
 
 void log_input_args(dpu_params_t input_arguments, size_t it) {
-    printf("(%zu. %d, %d, %d)\n", it, input_arguments.input_size_bytes, input_arguments.model_size_bytes, input_arguments.nr_inputs);
+    printf("(%zu: %d) ", it, input_arguments.nr_inputs);
 }
 
 void transfer_data_to_dpus(struct dpu_set_t dpu_set, 
@@ -201,7 +201,7 @@ printf("\n");
     unsigned int each_dpu = 0;
 
     printf("Batch hashing\n");
-    batch_hashing(&hashes, &model, &reordered_binarized_test, num_samples);
+    batch_hashing(&hashes, &model, &reordered_binarized_train, num_samples);
 
     // Loop over main kernel
     for(int rep = 0; rep < p.n_warmup + p.n_reps; rep++) {
@@ -211,7 +211,7 @@ printf("\n");
             start(&timer, 0, rep - p.n_warmup);
 
         printf("Batch prediction\n");        
-        batch_prediction(predictions_host, &model, &binarized_test, num_samples);
+        batch_prediction(predictions_host, &model, &binarized_train, num_samples);
         if(rep >= p.n_warmup)
             stop(&timer, 0);
 
@@ -245,6 +245,7 @@ printf("\n");
             };
             log_input_args(input_arguments[i], i);
         }
+        printf("\n");
 
 
         if(rep >= p.n_warmup)
@@ -337,7 +338,7 @@ printf("\n");
 #ifdef CYCLES
     printf("DPU cycles  = %g\n", cc / p.n_reps);
 #elif INSTRUCTIONS
-    printf("DPU instructions, %d, %d, %.0f\n", NR_TASKLETS, num_samples, cc / p.n_reps);
+    printf("DPU instructions, %d, %d, %d, %.0f\n", nr_of_dpus, NR_TASKLETS, num_samples, cc / p.n_reps);
     // printf("DPU instructions (min) = %f\n", cc_min / p.n_reps);
 #endif
 	
@@ -357,9 +358,9 @@ printf("\n");
     for (i = 0; i < num_samples; i++) {
         if(predictions_host[i] != predictions[i]) {
             status = false;
-            // printf("Sample %d> %u -- %u_ \n", i, predictions[i], predictions_host[i]);
+            printf("Sample %d> %u -- %u_ \n", i, predictions[i], predictions_host[i]);
         }
-        printf("Sample %d> %u -- %u_ \n", i, predictions[i], predictions_host[i]);
+        // printf("Sample %d> %u -- %u_ \n", i, predictions[i], predictions_host[i]);
     }
     if (status) {
         printf("\n[" ANSI_COLOR_GREEN "OK" ANSI_COLOR_RESET "] Outputs are equal\n");
