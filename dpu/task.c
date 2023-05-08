@@ -75,6 +75,7 @@ int main_kernel1() {
     // Load model + input
     uint32_t model_size_dpu_bytes = DPU_INPUT_ARGUMENTS.model_size_bytes; // Transfer input size per DPU in bytes
     uint32_t input_size_dpu_bytes = DPU_INPUT_ARGUMENTS.input_size_bytes; // Input size per DPU in bytes
+    uint32_t input_transfer_size_dpu_bytes = DPU_INPUT_ARGUMENTS.input_transfer_size_bytes; // Transfer input size per DPU in bytes
     uint32_t nr_inputs = DPU_INPUT_ARGUMENTS.nr_inputs; // Number of inputs per DPU
 
     dpu_model_params_t model_params = DPU_INPUT_ARGUMENTS.model_params;
@@ -82,12 +83,13 @@ int main_kernel1() {
 #if PRINT
     printf("model size: %u bytes\n", model_size_dpu_bytes);
     printf("input size: %u bytes\n", input_size_dpu_bytes);
+    printf("number of inputs: %u\n", nr_inputs);
     printf("model params: %u %u %u %u %u %u\n", model_params.num_classes, model_params.num_filters, model_params.filter_inputs, model_params.filter_entries, model_params.filter_hashes, model_params.bleach);
 #endif
 
     uint32_t mram_base_addr_model = (uint32_t) (DPU_MRAM_HEAP_POINTER);
     uint32_t mram_base_addr_inputs = (uint32_t) (mram_base_addr_model + model_size_dpu_bytes);
-    uint32_t mram_base_addr_predictions = (uint32_t) (mram_base_addr_inputs + input_size_dpu_bytes);
+    uint32_t mram_base_addr_predictions = (uint32_t) (mram_base_addr_inputs + input_transfer_size_dpu_bytes);
 
     // Each tasklet only needs to store one filter element in mram
     uint32_t* filter_buffer = (uint32_t*) mem_alloc(ROUND_UP_TO_MULTIPLE_OF_8(sizeof(*filter_buffer)));
@@ -125,11 +127,11 @@ int main_kernel1() {
                     uint32_t offset = (model_entry_addr - aligned_addr) / sizeof(*filter_buffer);
                     
                     mram_read(aligned_addr, filter_buffer, ROUND_UP_TO_MULTIPLE_OF_8(sizeof(*filter_buffer)));
-    // #if PRINT
-    //                 printf("%u. Hash %u: %u\n", tasklet_id, hash_it, hash);
-    //                 printf("%u. Model entry address: %u (%u)\n", tasklet_id, aligned_addr, offset);
-    //                 printf("%u. Model entry: %u (%u)\n", tasklet_id, filter_buffer[offset], filter_buffer[1-offset]);
-    // #endif
+// #if PRINT
+//                     printf("%u. Hash %u: %u\n", tasklet_id, hash_it, hash);
+//                     printf("%u. Model entry address: %u (%u)\n", tasklet_id, aligned_addr, offset);
+//                     printf("%u. Model entry: %u (%u)\n", tasklet_id, filter_buffer[offset], filter_buffer[1-offset]);
+// #endif
                     uint32_t entry = filter_buffer[offset];
                     if(entry <= min) min = entry;
                 }

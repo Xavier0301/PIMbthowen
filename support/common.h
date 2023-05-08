@@ -18,6 +18,9 @@ typedef struct {
 typedef struct {
     uint32_t model_size_bytes;
     uint32_t input_size_bytes;
+    uint32_t input_transfer_size_bytes;
+    uint32_t output_size_bytes;
+    uint32_t output_transfer_size_bytes;
     uint32_t nr_inputs;
 
     enum kernels {
