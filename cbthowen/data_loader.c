@@ -168,7 +168,7 @@ void binarize_matrix(bmatrix_t* result, bmatrix_t* dataset, size_t sample_size, 
 }
 
 void binarize_mnist(size_t num_bits) {
-    // Allocating buffers
+    // Allocate buffers
     bmatrix_init(&binarized_train, MNIST_NUM_TRAIN, MNIST_IM_SIZE * num_bits);
     bmatrix_init(&binarized_test, MNIST_NUM_TEST, MNIST_IM_SIZE * num_bits);
 
@@ -190,7 +190,7 @@ void reorder_dataset(bmatrix_t* result, bmatrix_t* dataset, size_t* order, size_
 }
 
 void reorder_binarized_mnist(size_t* order, size_t num_bits) {
-    // Allocating buffers
+    // Allocate buffers
     bmatrix_init(&reordered_binarized_train, MNIST_NUM_TRAIN, MNIST_IM_SIZE * num_bits);
     bmatrix_init(&reordered_binarized_test, MNIST_NUM_TEST, MNIST_IM_SIZE * num_bits);
 

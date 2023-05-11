@@ -160,7 +160,9 @@ printf("\n");
     printf("Binarizing dataset with %zu bits per input\n", model.bits_per_input);
     binarize_mnist(model.bits_per_input);
 
+#if PRINT
     print_binarized_mnist_image(0, 2);
+#endif
 
     printf("Reordering dataset\n");
     reorder_binarized_mnist(model.input_order, model.bits_per_input);
@@ -206,14 +208,27 @@ printf("\n");
     // Loop over main kernel
     for(int rep = 0; rep < p.n_warmup + p.n_reps; rep++) {
 
-        // Compute output on CPU (verification purposes)
         if(rep >= p.n_warmup)
             start(&timer, 0, rep - p.n_warmup);
 
-        printf("Batch prediction\n");        
-        batch_prediction(predictions_host, &model, &binarized_train, num_samples);
+        binarize_matrix(&binarized_train, &train_images, MNIST_IM_SIZE, num_samples, model.bits_per_input);
         if(rep >= p.n_warmup)
             stop(&timer, 0);
+
+        if(rep >= p.n_warmup)
+            start(&timer, 1, rep - p.n_warmup);
+        reorder_dataset(&reordered_binarized_train, &binarized_train, model.input_order, num_samples, MNIST_IM_SIZE * model.bits_per_input);
+        if(rep >= p.n_warmup)
+            stop(&timer, 1);
+
+        if(rep >= p.n_warmup)
+            start(&timer, 2, rep - p.n_warmup);
+        batch_hashing(&hashes, &model, &reordered_binarized_train, num_samples);
+        if(rep >= p.n_warmup)
+            stop(&timer, 2);
+#if defined(CHECK_RES)
+        batch_prediction(predictions_host, &model, &binarized_train, num_samples);
+#endif
 
         printf("Load DPU arguments\n");
         // Input arguments
@@ -243,13 +258,13 @@ printf("\n");
                 .kernel = kernel,
                 .model_params = model_params
             };
-            log_input_args(input_arguments[i], i);
+            // log_input_args(input_arguments[i], i);
         }
-        printf("\n");
+        // printf("\n");
 
 
         if(rep >= p.n_warmup)
-            start(&timer, 1, rep - p.n_warmup); // Start timer (CPU-DPU transfers)
+            start(&timer, 3, rep - p.n_warmup); // Start timer (CPU-DPU transfers)
         i = 0;
 		// Copy input arguments
         // Parallel transfers
@@ -261,16 +276,16 @@ printf("\n");
         transfer_data_to_dpus(dpu_set, nr_of_dpus, input_arguments, model_bytes, dpu_input_transfer_size_bytes);
 
         if(rep >= p.n_warmup)
-            stop(&timer, 1); // Stop timer (CPU-DPU transfers)
+            stop(&timer, 3); // Stop timer (CPU-DPU transfers)
 		
         printf("Run program on DPU(s) \n");
         // Run DPU kernel
         if(rep >= p.n_warmup) {
-            start(&timer, 2, rep - p.n_warmup); // Start timer (DPU kernel)
+            start(&timer, 4, rep - p.n_warmup); // Start timer (DPU kernel)
         }
         DPU_ASSERT(dpu_launch(dpu_set, DPU_SYNCHRONOUS));
         if(rep >= p.n_warmup) {
-            stop(&timer, 2); // Stop timer (DPU kernel)
+            stop(&timer, 4); // Stop timer (DPU kernel)
         }
 
 #if PRINT
@@ -287,13 +302,13 @@ printf("\n");
 
         printf("Retrieve results\n");
         if(rep >= p.n_warmup)
-            start(&timer, 3, rep - p.n_warmup); // Start timer (DPU-CPU transfers)
+            start(&timer, 5, rep - p.n_warmup); // Start timer (DPU-CPU transfers)
         i = 0;
 
         retrieve_data_from_dpus(dpu_set, nr_of_dpus, input_arguments, model_bytes, dpu_input_transfer_size_bytes, dpu_output_transfer_size_bytes);
 
         if(rep >= p.n_warmup)
-            stop(&timer, 3); // Stop timer (DPU-CPU transfers)
+            stop(&timer, 5); // Stop timer (DPU-CPU transfers)
 
 #if defined(CYCLES) || defined(INSTRUCTIONS)
         dpu_results_t results[nr_of_dpus];
@@ -334,26 +349,48 @@ printf("\n");
         cc /= (double) NR_TASKLETS;
         cc_min /= (double) NR_TASKLETS;
 #endif
+
+        if(rep >= p.n_warmup)
+            start(&timer, 6, rep - p.n_warmup);
+        batch_prediction(predictions_host, &model, &binarized_train, num_samples);
+        if(rep >= p.n_warmup)
+            stop(&timer, 6);
     }
 #ifdef CYCLES
-    printf("DPU cycles  = %g\n", cc / p.n_reps);
+    printf("results_and_timings(cycles), %d, %d, %d, %g", nr_of_dpus, NR_TASKLETS, num_samples, cc / p.n_reps);
 #elif INSTRUCTIONS
-    printf("DPU instructions, %d, %d, %d, %.0f\n", nr_of_dpus, NR_TASKLETS, num_samples, cc / p.n_reps);
+    printf("results_and_timings(instructions), %d, %d, %d, %.0f", nr_of_dpus, NR_TASKLETS, num_samples, cc / p.n_reps);
     // printf("DPU instructions (min) = %f\n", cc_min / p.n_reps);
 #endif
 	
     // Print timing results
-    printf("CPU ");
-    print(&timer, 0, p.n_reps);
-    printf("CPU-DPU ");
-    print(&timer, 1, p.n_reps);
-    printf("DPU Kernel ");
-    print(&timer, 2, p.n_reps);
-    printf("DPU-CPU ");
-    print(&timer, 3, p.n_reps);
+    // printf("CPU ");
+    // print(&timer, 0, p.n_reps);
+    // printf("CPU-DPU ");
+    // print(&timer, 1, p.n_reps);
+    // printf("DPU Kernel ");
+    // print(&timer, 2, p.n_reps);
+    // printf("DPU-CPU ");
+    // print(&timer, 3, p.n_reps);
 
-    // Check output
+    printf(", ");
+    print2(&timer, 0, p.n_reps);
+    printf(", ");
+    print2(&timer, 1, p.n_reps);
+    printf(", ");
+    print2(&timer, 2, p.n_reps);
+    printf(", ");
+    print2(&timer, 3, p.n_reps);
+    printf(", ");
+    print2(&timer, 4, p.n_reps);
+    printf(", ");
+    print2(&timer, 5, p.n_reps);
+    printf(", ");
+    print2(&timer, 6, p.n_reps);
+
     puts("");
+#if defined(CHECK_RES)
+    // Check output
     bool status = true;
     for (i = 0; i < num_samples; i++) {
         if(predictions_host[i] != predictions[i]) {
@@ -367,6 +404,7 @@ printf("\n");
     } else {
         printf("\n[" ANSI_COLOR_RED "ERROR" ANSI_COLOR_RESET "] Outputs differ!\n");
     }
+#endif
 
     // Deallocation
     // free(X);
@@ -374,5 +412,5 @@ printf("\n");
     // free(Y_host);
     DPU_ASSERT(dpu_free(dpu_set)); // Deallocate DPUs
 	
-    return status ? 0 : -1;
+    return 0;
 }
