@@ -33,6 +33,8 @@ typedef struct {
     tensor3d_t data; // of shape (#Discriminators, #Filters, #Entries)
 } model_t;
 
+void generate_h3_values(matrix_t* values, size_t num_hashes, size_t num_inputs, size_t num_entries);
+
 void reorder_array(element_t* buffer, element_t* input, size_t* order, size_t len);
 
 /**

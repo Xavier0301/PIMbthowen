@@ -18,7 +18,7 @@
 #include "../support/params.h"
 
 #include "../cbthowen/model.h"
-#include "../cbthowen/model_manager.h"
+#include "../cbthowen/data_manager.h"
 #include "../cbthowen/data_loader.h"
 #include "../cbthowen/batch.h"
 
@@ -153,19 +153,22 @@ printf("\n");
 
     printf("Model has bleach %d\n", model.bleach);
 
-    // Loading+Binarizing dataset
+    // Loading binarized dataset
     printf("Loading dataset\n");
-    load_mnist();
-
-    printf("Binarizing dataset with %zu bits per input\n", model.bits_per_input);
-    binarize_mnist(model.bits_per_input);
+    const unsigned int num_samples = p.num_samples;
+    bmatrix_t binarized_infimnist;
+    bmatrix_init(&binarized_infimnist, num_samples, MNIST_IM_SIZE * model.bits_per_input);
+    size_t num_samples_total, sample_size;
+    read_dataset_partial("../data/binarized8m.dat", &binarized_infimnist, num_samples, &num_samples_total, &sample_size);
 
 #if PRINT
-    print_binarized_mnist_image(0, 2);
+    print_binarized_image_raw(&binarized_infimnist, infimnist_labels, 0, 2);
 #endif
 
     printf("Reordering dataset\n");
-    reorder_binarized_mnist(model.input_order, model.bits_per_input);
+    bmatrix_t reordered_binarized_infinimnist;
+    bmatrix_init(&reordered_binarized_infinimnist, num_samples, MNIST_IM_SIZE * model.bits_per_input);
+    reorder_dataset(&reordered_binarized_infinimnist, &binarized_infimnist, model.input_order, num_samples, MNIST_IM_SIZE * model.bits_per_input);
 
     // Calculate model size (transfer size is identical to model size)
     const unsigned int model_entries = model.filter_entries * model.num_filters * model.num_classes;
@@ -173,7 +176,6 @@ printf("\n");
     const unsigned int model_entries_aligned = aligned_count(model_entries, model_entry_bytes);
 
     // Input size calculations
-    const unsigned int num_samples = p.num_samples;
     const unsigned int dpu_num_samples_max = divceil(num_samples, nr_of_dpus);
 
     const unsigned int hashes_per_sample = model.num_filters * model.filter_hashes;
@@ -203,31 +205,24 @@ printf("\n");
     unsigned int each_dpu = 0;
 
     printf("Batch hashing\n");
-    batch_hashing(&hashes, &model, &reordered_binarized_train, num_samples);
+    batch_hashing(&hashes, &model, &reordered_binarized_infinimnist, num_samples);
 
     // Loop over main kernel
     for(int rep = 0; rep < p.n_warmup + p.n_reps; rep++) {
 
         if(rep >= p.n_warmup)
             start(&timer, 0, rep - p.n_warmup);
-
-        binarize_matrix(&binarized_train, &train_images, MNIST_IM_SIZE, num_samples, model.bits_per_input);
+        reorder_dataset(&reordered_binarized_infinimnist, &binarized_infimnist, model.input_order, num_samples, MNIST_IM_SIZE * model.bits_per_input);
         if(rep >= p.n_warmup)
             stop(&timer, 0);
 
         if(rep >= p.n_warmup)
             start(&timer, 1, rep - p.n_warmup);
-        reorder_dataset(&reordered_binarized_train, &binarized_train, model.input_order, num_samples, MNIST_IM_SIZE * model.bits_per_input);
+        batch_hashing(&hashes, &model, &reordered_binarized_infinimnist, num_samples);
         if(rep >= p.n_warmup)
             stop(&timer, 1);
-
-        if(rep >= p.n_warmup)
-            start(&timer, 2, rep - p.n_warmup);
-        batch_hashing(&hashes, &model, &reordered_binarized_train, num_samples);
-        if(rep >= p.n_warmup)
-            stop(&timer, 2);
 #if defined(CHECK_RES)
-        batch_prediction(predictions_host, &model, &binarized_train, num_samples);
+        batch_prediction(predictions_host, &model, &binarized_infimnist, num_samples);
 #endif
 
         printf("Load DPU arguments\n");
@@ -264,7 +259,7 @@ printf("\n");
 
 
         if(rep >= p.n_warmup)
-            start(&timer, 3, rep - p.n_warmup); // Start timer (CPU-DPU transfers)
+            start(&timer, 2, rep - p.n_warmup); // Start timer (CPU-DPU transfers)
         i = 0;
 		// Copy input arguments
         // Parallel transfers
@@ -276,16 +271,16 @@ printf("\n");
         transfer_data_to_dpus(dpu_set, nr_of_dpus, input_arguments, model_bytes, dpu_input_transfer_size_bytes);
 
         if(rep >= p.n_warmup)
-            stop(&timer, 3); // Stop timer (CPU-DPU transfers)
+            stop(&timer, 2); // Stop timer (CPU-DPU transfers)
 		
         printf("Run program on DPU(s) \n");
         // Run DPU kernel
         if(rep >= p.n_warmup) {
-            start(&timer, 4, rep - p.n_warmup); // Start timer (DPU kernel)
+            start(&timer, 3, rep - p.n_warmup); // Start timer (DPU kernel)
         }
         DPU_ASSERT(dpu_launch(dpu_set, DPU_SYNCHRONOUS));
         if(rep >= p.n_warmup) {
-            stop(&timer, 4); // Stop timer (DPU kernel)
+            stop(&timer, 3); // Stop timer (DPU kernel)
         }
 
 #if PRINT
@@ -302,13 +297,13 @@ printf("\n");
 
         printf("Retrieve results\n");
         if(rep >= p.n_warmup)
-            start(&timer, 5, rep - p.n_warmup); // Start timer (DPU-CPU transfers)
+            start(&timer, 4, rep - p.n_warmup); // Start timer (DPU-CPU transfers)
         i = 0;
 
         retrieve_data_from_dpus(dpu_set, nr_of_dpus, input_arguments, model_bytes, dpu_input_transfer_size_bytes, dpu_output_transfer_size_bytes);
 
         if(rep >= p.n_warmup)
-            stop(&timer, 5); // Stop timer (DPU-CPU transfers)
+            stop(&timer, 4); // Stop timer (DPU-CPU transfers)
 
 #if defined(CYCLES) || defined(INSTRUCTIONS)
         dpu_results_t results[nr_of_dpus];
@@ -351,10 +346,10 @@ printf("\n");
 #endif
 
         if(rep >= p.n_warmup)
-            start(&timer, 6, rep - p.n_warmup);
-        batch_prediction(predictions_host, &model, &binarized_train, num_samples);
+            start(&timer, 5, rep - p.n_warmup);
+        batch_prediction(predictions_host, &model, &binarized_infimnist, num_samples);
         if(rep >= p.n_warmup)
-            stop(&timer, 6);
+            stop(&timer, 5);
     }
 #ifdef CYCLES
     printf("results_and_timings(cycles), %d, %d, %d, %g", nr_of_dpus, NR_TASKLETS, num_samples, cc / p.n_reps);

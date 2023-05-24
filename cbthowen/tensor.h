@@ -43,6 +43,7 @@ typedef struct {
 #define MATRIX_(t, index) (MATRIX(t, index.axis1, index.axis2))
 
 void matrix_init(matrix_t* m, size_t rows, size_t cols);
+void matrix_print(matrix_t* m, size_t rows, size_t cols);
 
 typedef struct {
     size_t stride;

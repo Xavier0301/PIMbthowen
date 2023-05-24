@@ -13,6 +13,14 @@ void matrix_init(matrix_t* m, size_t rows, size_t cols) {
     m->data = (entry_t*) calloc(rows * cols, sizeof(*m->data));
 }
 
+void matrix_print(matrix_t* m, size_t rows, size_t cols) {
+    for(size_t i = 0; i < rows; ++i) {
+        for(size_t j = 0; j < cols; ++j)
+            printf("%u ", *MATRIX(*m, i, j));
+        printf("\n");
+    }
+}
+
 void bmatrix_init(bmatrix_t* m, size_t rows, size_t cols) {
     m->stride = cols;
 

@@ -7,7 +7,7 @@
 #include <stdint.h>
 
 #include "model.h"
-#include "model_manager.h"
+#include "data_manager.h"
 
 extern model_t global_model;
 

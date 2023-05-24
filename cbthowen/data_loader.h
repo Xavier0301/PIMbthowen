@@ -17,33 +17,30 @@
 #define MNIST_TEST_IMAGE "./data/t10k-images-idx3-ubyte"
 #define MNIST_TEST_LABEL "./data/t10k-labels-idx1-ubyte"
 
+#define INFIMNIST_PATTERNS "./data/mnist8m-patterns-idx3-ubyte"
+#define INFIMNIST_LABELS "./data/mnist8m-labels-idx1-ubyte"
+
 #define MNIST_IM_SIZE 784 // 28*28
+#define MNIST_SIDE_LEN 28
+#define INFIMNIST_NUM_SAMPLES 8000000
 #define MNIST_NUM_TRAIN 60000
 #define MNIST_NUM_TEST 10000
 #define MNIST_LEN_INFO_IMAGE 4
 #define MNIST_LEN_INFO_LABEL 2
 
-extern bmatrix_t train_images; // Of shape (#Samples, 784) -> flattened
-extern bmatrix_t test_images; // Of shape (#Samples, 784) -> flattened
-extern unsigned char* train_labels; // Of shape (#Samples,)
-extern unsigned char* test_labels; // Of shape (#Samples,)
-
-extern bmatrix_t binarized_train; // Of shape (#Samples, 784 * bits_per_pixel)
-extern bmatrix_t binarized_test; // Of shape (#Samples, 784 * bits_per_pixel)
-
-extern bmatrix_t reordered_binarized_train; // Of shape (#Samples, 784 * bits_per_pixel)
-extern bmatrix_t reordered_binarized_test; // Of shape (#Samples, 784 * bits_per_pixel)
-
-void load_mnist();
+void load_mnist_file(bmatrix_t* patterns, unsigned char* labels, char* image_path, char* label_path, size_t num_samples);
+void load_mnist_train(bmatrix_t* patterns, unsigned char* labels, size_t num_samples);
+void load_mnist_test(bmatrix_t* patterns, unsigned char* labels, size_t num_samples);
+void load_infimnist(bmatrix_t* patterns, unsigned char* labels, size_t num_samples);
 
 void binarize_matrix(bmatrix_t* result, bmatrix_t* dataset, size_t sample_size, size_t num_samples, size_t num_bits);
-void binarize_mnist(size_t num_bits);
 
 void reorder_dataset(bmatrix_t* result, bmatrix_t* dataset, size_t* order, size_t num_samples, size_t num_elements);
-void reorder_binarized_mnist(size_t* order, size_t num_bits);
 
-void print_binarized_mnist_image(size_t index, size_t num_bits);
-void print_mnist_image(size_t index);
-void print_mnist_image_raw(size_t index);
+void print_binarized_image_raw(bmatrix_t* m, unsigned char* labels, size_t index, size_t num_bits);
+void print_binarized_image(bmatrix_t* m, unsigned char* labels, size_t index, size_t num_bits);
+void print_image_raw(bmatrix_t* m, unsigned char* labels, size_t index);
+void print_image(bmatrix_t* m, unsigned char* labels, size_t index);
 
 void fill_input_random(unsigned char* input, size_t input_length);
+
